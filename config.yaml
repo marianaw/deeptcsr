@@ -8,3 +8,6 @@ num_epochs: 101
 horizon: 5
 output_file: Results/aids/{}/
 landmark: True
+
+lambda_: 0.1
+num_steps: 5

@@ -50,7 +50,7 @@ def get_data(data_path, landmark):
     return seqs, target, mask, ts, cs
 
 
-def train_test_split(X, y, mask, rng, test_size=0.2):
+def train_test_split(X, y, mask, ts, cs, rng, test_size=0.2):
     # Shuffle the indices of the data
     num_samples = X.shape[0]
     shuffled_indices = jax.random.permutation(rng, jnp.arange(num_samples))
@@ -69,15 +69,22 @@ def train_test_split(X, y, mask, rng, test_size=0.2):
     y_test = y[test_indices]
     m_train = mask[train_indices]
     m_test = mask[test_indices]
+    ts_train = ts[train_indices]
+    ts_test = ts[test_indices]
+    cs_train = cs[train_indices]
+    cs_test = cs[test_indices]
 
-    return X_train, X_test, y_train, y_test, m_train, m_test
+    return X_train, X_test, y_train, y_test, m_train, m_test, \
+        ts_train, ts_test, cs_train, cs_test
 
 
 class DataGenerator:
 
-    def __init__(self, X, y, mask, batch_size, rng, shuffle=True):
+    def __init__(self, X, y, mask, ts, cs, batch_size, rng, shuffle=True):
         self.X = X
         self.y = y
+        self.ts = ts
+        self.cs = cs
         self.mask = mask
         self.shuffle = shuffle
         self.rng = rng

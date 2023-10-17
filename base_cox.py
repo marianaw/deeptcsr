@@ -51,7 +51,7 @@ class ModelState:
     opt_state: optax.OptState
 
 
-class SA:
+class BaseSA:
     def __init__(
         self,
         config_kwargs,
@@ -102,7 +102,6 @@ class SA:
         opt_state = optimizer.init(params)
         online_enc_update = get_update_and_apply(optimizer)
 
-
         # State of the model
         self.state = ModelState(
             params=params,
@@ -113,10 +112,10 @@ class SA:
         self.output_file = self.config.output_file
 
         # Losses
-        def loss_fn(params, inputs, targets, mask):
+        def loss_fn(params, inputs, targets, ws):
             logits = self.forward(params, inputs)
             loss = optax.sigmoid_binary_cross_entropy(logits, targets)
-            loss = jnp.mean(loss * mask)
+            loss = jnp.mean(loss * ws)
             return loss
 
         loss_fn = jax.value_and_grad(loss_fn, has_aux=False)

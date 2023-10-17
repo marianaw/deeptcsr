@@ -114,7 +114,7 @@ class HorizonBias(hk.Module):
 
     def __call__(self, inputs):
         #If inputs is of shape (batch_size, dim)
-        if len(inputs.shape) == 2:
+        if len(inputs.shape) == 1:
             # We add a dimension to account for the time step:
             # (batch_size, time_step, dim)
             # Observe that when calling this function dim = 1.

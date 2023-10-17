@@ -2,7 +2,7 @@ import haiku as hk
 import jax
 import jax.numpy as jnp
 import optax
-from typing import Any, Mapping, Text
+from typing import Any, Mapping, Optional, Text, Type
 
 
 def get_update_and_apply(optimizer):
@@ -75,63 +75,6 @@ class TCN(hk.Module):
             out = layer(out)
         return out
 
-class CustomBatchNorm(hk.Module):
-    def __init__(
-        self,
-        create_scale: bool,
-        create_offset: bool,
-        eps: float = 1e-5,
-    ):
-
-        super().__init__()
-        self.create_scale = create_scale
-        self.create_offset = create_offset
-        self.eps = eps
-        self.scale_init = jnp.ones
-        self.offset_init = jnp.zeros
-        self.channel_index = hk.get_channel_index("channels_last")
-
-    def __call__(
-        self,
-        inputs: jax.Array,
-    ) -> jax.Array:
-        """Computes the normalized version of the input.
-
-        Args:
-        inputs: An array, where the data format is ``[..., C]``.
-        Returns:
-        The array, normalized across all but the last dimension.
-        """
-
-        channel_index = self.channel_index
-        if channel_index < 0:
-            channel_index += inputs.ndim
-
-        axis = [i for i in range(inputs.ndim) if i != channel_index]
-
-        mean = jnp.mean(inputs, axis, keepdims=True)
-        mean_of_squares = jnp.mean(jnp.square(inputs), axis, keepdims=True)
-        var = mean_of_squares - jnp.square(mean)
-
-        w_shape = [1 if i in axis else inputs.shape[i]
-                   for i in range(inputs.ndim)]
-        w_dtype = inputs.dtype
-
-        if self.create_scale:
-            scale = hk.get_parameter(
-                "scale", w_shape, w_dtype, self.scale_init)
-        else:
-            scale = jnp.ones([], dtype=w_dtype)
-
-        if self.create_offset:
-            offset = hk.get_parameter(
-                "offset", w_shape, w_dtype, self.offset_init)
-        else:
-            offset = jnp.zeros([], dtype=w_dtype)
-
-        eps = jax.lax.convert_element_type(self.eps, var.dtype)
-        inv = scale * jax.lax.rsqrt(var + eps)
-        return (inputs - mean) * inv + offset
     
 class MLP(hk.Module):
   """One hidden layer perceptron, with normalization."""
@@ -161,3 +104,20 @@ class MLP(hk.Module):
     out = jax.nn.relu(out)
     out = self.linear2(out)
     return out
+  
+
+class HorizonBias(hk.Module):
+
+    def __init__(self, horizon, name: str | None = None):
+        super().__init__(name)
+        self.params = hk.get_parameter("alpha_t", (horizon,), init=jnp.zeros)
+
+    def __call__(self, inputs):
+        #If inputs is of shape (batch_size, dim)
+        if len(inputs.shape) == 2:
+            # We add a dimension to account for the time step:
+            # (batch_size, time_step, dim)
+            # Observe that when calling this function dim = 1.
+            inputs = jnp.expand_dims(inputs, axis=1)
+
+        return inputs + self.params

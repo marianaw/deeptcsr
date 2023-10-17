@@ -114,10 +114,24 @@ class HorizonBias(hk.Module):
 
     def __call__(self, inputs):
         #If inputs is of shape (batch_size, dim)
-        if len(inputs.shape) == 1:
-            # We add a dimension to account for the time step:
-            # (batch_size, time_step, dim)
-            # Observe that when calling this function dim = 1.
-            inputs = jnp.expand_dims(inputs, axis=1)
+        # if len(inputs.shape) == 1:
+        #     # We add a dimension to account for the time step:
+        #     # (batch_size, time_step, dim)
+        #     # Observe that when calling this function dim = 1.
+        #     inputs = jnp.expand_dims(inputs, axis=1)
 
         return inputs + self.params
+
+
+class CoxLinearModel(hk.Module):
+
+    def __init__(self, n_feats, horizon, name: str | None = None):
+        super().__init__(name)
+        self.horizon = horizon
+        self.params = jnp.zeros(n_feats + horizon)
+
+    def __call__(self, xs):   
+        return (
+            jnp.expand_dims(jnp.dot(xs, self.params[: -self.horizon]), axis=1)
+            + self.params[-self.horizon :]
+        )

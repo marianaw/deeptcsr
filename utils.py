@@ -167,3 +167,7 @@ def concordance_index(scores, ts, cs):
     # Thin wrapper around the `lifelines` implementation.
     cs = cs.astype(jnp.bool_)
     return _concordance_index(ts + cs, scores, ~cs)
+
+
+def unroll():
+    pass

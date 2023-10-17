@@ -9,7 +9,7 @@ import haiku as hk
 import optax
 import pandas as pd
 
-from networks import get_update_and_apply, HorizonBias
+from networks import CoxLinearModel, get_update_and_apply, HorizonBias
 from utils import DataGenerator, batch_generator, get_data, kaplan_meier, train_test_split
 
 
@@ -83,11 +83,8 @@ class BaseSA:
         
         # Encoder
         def forward_fn(x):
-            linear = hk.Linear(1, name='feature_ext')
-            alpha_t = HorizonBias(horizon=H, name='horizon_bias')
-            out = linear(x)
-            out = alpha_t(out)
-            return out
+            cox = CoxLinearModel(dim, H)
+            return cox(x)
 
         _some_input = self.data['seqs'][0]
         _some_input = _some_input.reshape(1, *_some_input.shape)

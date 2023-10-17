@@ -128,10 +128,16 @@ class CoxLinearModel(hk.Module):
     def __init__(self, n_feats, horizon, name: str | None = None):
         super().__init__(name)
         self.horizon = horizon
-        self.params = jnp.zeros(n_feats + horizon)
+        self.beta = hk.get_parameter("beta", (n_feats,), init=jnp.zeros)
+        self.alpha = hk.get_parameter("alpha", (horizon, ), init=jnp.zeros)
+        # self.params = hk.get_parameter("params", (n_feats + horizon,), init=jnp.zeros)
 
     def __call__(self, xs):   
+        # return (
+        #     jnp.expand_dims(jnp.dot(xs, self.params[: -self.horizon]), axis=1)
+        #     + self.params[-self.horizon :]
+        # )
         return (
-            jnp.expand_dims(jnp.dot(xs, self.params[: -self.horizon]), axis=1)
-            + self.params[-self.horizon :]
+            jnp.expand_dims(jnp.dot(xs, self.beta), axis=1)
+            + self.alpha
         )

@@ -86,8 +86,8 @@ class BaseSA:
             cox = CoxLinearModel(dim, H)
             return cox(x)
 
-        _some_input = self.data['seqs'][0]
-        _some_input = _some_input.reshape(1, *_some_input.shape)
+        _some_input = self.data['seqs'][:20]
+        # _some_input = _some_input.reshape(1, *_some_input.shape)
         _key = self._next_rng_key()
         forward = hk.without_apply_rng(hk.transform(forward_fn))
         params = forward.init(_key, _some_input)

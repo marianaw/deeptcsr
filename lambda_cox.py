@@ -1,10 +1,9 @@
 import os
-import chex
 import jax
 import jax.numpy as jnp
-import optax
-from base_cox import BaseSA, ConfigParams, ModelState
-from utils import train_test_split
+import pandas as pd
+from base_cox import BaseSA, ConfigParams
+from utils import train_test_split, unroll
 from dataclasses import dataclass
 
 
@@ -22,6 +21,19 @@ class LambdaSA(BaseSA):
         new_config = Config.from_dict(config_kwargs)
         self.lambda_ = new_config.lambda_
         self.num_steps = new_config.num_steps
+
+    def _get_train_test(self):
+        subkey = self._next_rng_key()
+        X_train, X_test,\
+             ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
+                                                                    self.data['ts'],
+                                                                    self.data['cs'],
+                                                                    rng=subkey)
+        if self.config.landmark:
+            X_train, ts_train, cs_train = unroll(X_train, ts_train, cs_train)
+            X_test, ts_test, cs_test = unroll(X_test, ts_test, cs_test)
+        
+        return X_train, X_test, ts_train, ts_test, cs_train, cs_test
 
     def _targets(self, m, seqs, ts, cs):
         """Compute pseudo-targets and weights for the m-step backup."""
@@ -78,6 +90,7 @@ class LambdaSA(BaseSA):
     
     def _inner_loop(self, seqs, ys, ws):
         """Training loop"""
+        epoch_loss = []
         for epoch in range(self.config.num_epochs):
 
             self.state, loss = self.update(
@@ -88,27 +101,34 @@ class LambdaSA(BaseSA):
             )
 
             # log
-            if epoch % self.config.log_interval == 0:
-                print(f"Epoch: {epoch+1}/{self.config.num_epochs}")
-                print(f"Train classification loss: {loss:.3f} at epoch {epoch}")
-                print()
+            # if epoch % self.config.log_interval == 0:
+            #     print(f"Epoch: {epoch+1}/{self.config.num_epochs}")
+            #     print(f"Train classification loss: {loss.item():.3f} at epoch {epoch}")
+            #     print()
+            epoch_loss.append(loss.item())
 
-    def train(self):
-        train_loss = []
-        test_loss = []
+        return epoch_loss
 
-        X_train, X_test, y_train, y_test, m_train, m_test,\
-             ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
-                                                                    self.data['target'],
-                                                                    self.data['mask'],
-                                                                    self.data['ts'],
-                                                                    self.data['cs'],
-                                                                    rng=self._next_rng_key())
+    def train(self, X_train, ts_train, cs_train):
+
+        # X_train, X_test, ts_train, ts_test, cs_train, cs_test = self._get_train_test()
+
+        # Outer loop
+        losses = []
         for i in range(self.num_steps):
-            print('\n\n Step (outer loop) {}\n\n'.format(i))
+            # print('\n\n Step (outer loop) {}\n\n'.format(i))
             ys, ws = self._update_target(X_train, ts_train, cs_train, self.lambda_)
-            self._inner_loop(X_train[:, 0], ys, ws)
-            
-        if self.output_file is not None:
-            if not os.path.exists(self.output_file):
-                os.makedirs(self.output_file)
+            loss = self._inner_loop(X_train[:,0], ys, ws)
+            losses.append(loss)
+
+        # if self.output_file is not None:
+        #     if not os.path.exists(self.output_file):
+        #         os.makedirs(self.output_file)
+
+        #     df = pd.DataFrame({
+        #         "loss": losses,
+        #     })
+        #     path_csv = os.path.join(self.output_file, 'result.csv')
+        #     df.to_csv(path_csv)
+
+        return losses

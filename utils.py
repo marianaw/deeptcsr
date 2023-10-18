@@ -50,7 +50,7 @@ def get_data(data_path, landmark):
     return seqs, target, mask, ts, cs
 
 
-def train_test_split(X, y, mask, ts, cs, rng, test_size=0.2):
+def train_test_split(X, ts, cs, rng, test_size=0.2):
     # Shuffle the indices of the data
     num_samples = X.shape[0]
     shuffled_indices = jax.random.permutation(rng, jnp.arange(num_samples))
@@ -65,16 +65,12 @@ def train_test_split(X, y, mask, ts, cs, rng, test_size=0.2):
     # Use the indices to split the data
     X_train = X[train_indices]
     X_test = X[test_indices]
-    y_train = y[train_indices]
-    y_test = y[test_indices]
-    m_train = mask[train_indices]
-    m_test = mask[test_indices]
     ts_train = ts[train_indices]
     ts_test = ts[test_indices]
     cs_train = cs[train_indices]
     cs_test = cs[test_indices]
 
-    return X_train, X_test, y_train, y_test, m_train, m_test, \
+    return X_train, X_test, \
         ts_train, ts_test, cs_train, cs_test
 
 
@@ -169,5 +165,30 @@ def concordance_index(scores, ts, cs):
     return _concordance_index(ts + cs, scores, ~cs)
 
 
-def unroll():
-    pass
+def unroll(seqs, ts, cs, compress=False):
+    """Unroll sequences.
+
+    This function transforms each sequence `(x1, x2, ..., xt)` into
+    subsequences `((x1, x2, ..., xt), (x2, ..., xt), ..., (xt,))`.
+
+    Note: the smallest subsequence always contains two observed states, whether
+    implicitly or explicitly.
+
+    - For uncensored sequences, the smallest subsequence is `(xt,)` and
+      implicitly accounts for the terminal state that follows.
+    - For censored sequences, the smallest subsequence is `(x{t-1}, xt)`.
+    """
+    cs = cs.astype(jnp.bool_)
+    seqs_ = jnp.copy(seqs)
+    ts_ = jnp.copy(ts)
+    cs_ = jnp.copy(cs)
+    for i in range(1, jnp.max(ts)):
+        idx = ts > i  # Indices of seqs whose successor state is observed.
+        new = jnp.zeros((jnp.sum(idx),) + seqs.shape[1:], dtype=seqs.dtype)
+        new = new.at[:, :-i].set(seqs[idx, i:])
+        seqs_ = jnp.concatenate((seqs_, new))
+        ts_ = jnp.concatenate((ts_, ts[idx] - i))
+        cs_ = jnp.concatenate((cs_, cs[idx]))
+    if compress:
+        return (seqs_[:,:2], ts_, cs_)
+    return (seqs_, ts_, cs_)

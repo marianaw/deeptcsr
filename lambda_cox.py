@@ -22,28 +22,31 @@ class LambdaSA(BaseSA):
         self.lambda_ = new_config.lambda_
         self.num_steps = new_config.num_steps
 
-    def _get_train_test(self):
+    def _get_train_test(self, test_size=0.2):
         subkey = self._next_rng_key()
         X_train, X_test,\
-             ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
+            ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
                                                                     self.data['ts'],
                                                                     self.data['cs'],
-                                                                    rng=subkey)
+                                                                    rng=subkey,
+                                                                    test_size=test_size)
         if self.config.landmark:
             X_train, ts_train, cs_train = unroll(X_train, ts_train, cs_train)
             X_test, ts_test, cs_test = unroll(X_test, ts_test, cs_test)
-        
+
         return X_train, X_test, ts_train, ts_test, cs_train, cs_test
 
     def _targets(self, m, seqs, ts, cs):
         """Compute pseudo-targets and weights for the m-step backup."""
-        H = self.config.horizon
+        H = self.horizon
         ys = jnp.zeros((len(seqs), H))
         ws = jnp.zeros((len(seqs), H))
         # Observed outcomes within first m steps.
-        idx = (ts <= m) & ~cs  # Seqs that reached terminal state within window.
+        # Seqs that reached terminal state within window.
+        idx = (ts <= m) & ~cs
         ys = ys.at[idx, ts[idx] - 1].set(1.0)
-        ws = ws.at[:, :m].set((jnp.arange(m) < ts[:, jnp.newaxis]).astype(float))
+        ws = ws.at[:, :m].set(
+            (jnp.arange(m) < ts[:, jnp.newaxis]).astype(float))
         # Predicted outcomes after first m steps.
         if m < H:
             # Seqs that are still active after the window.
@@ -53,20 +56,20 @@ class LambdaSA(BaseSA):
             log_hs = jax.nn.log_sigmoid(logits)
             ys = ys.at[idx, m:].set(jnp.exp(log_hs[:, :-m]))
             ws = ws.at[idx, m].set(1.0)
-            ws = ws.at[idx, (m + 1) :].set(jnp.exp(
+            ws = ws.at[idx, (m + 1):].set(jnp.exp(
                 jnp.cumsum(
                     log_hs[:, : -(m + 1)] - logits[:, : -(m + 1)],
                     axis=1,
                 )
             ))
         return (ys, ws)
-    
+
     def _update_target(self, seqs, ts, cs, lambda_):
         # seqs = self.data['seqs']
         # ts = self.data['ts']
         # cs = self.data['cs']
 
-        H = self.config.horizon
+        H = self.horizon
         cs = cs.astype(bool)
         n = len(seqs)
 
@@ -87,7 +90,7 @@ class LambdaSA(BaseSA):
             ws += mult * ws_m
 
         return ys, ws
-    
+
     def _inner_loop(self, seqs, ys, ws):
         """Training loop"""
         epoch_loss = []
@@ -117,8 +120,9 @@ class LambdaSA(BaseSA):
         losses = []
         for i in range(self.num_steps):
             # print('\n\n Step (outer loop) {}\n\n'.format(i))
-            ys, ws = self._update_target(X_train, ts_train, cs_train, self.lambda_)
-            loss = self._inner_loop(X_train[:,0], ys, ws)
+            ys, ws = self._update_target(
+                X_train, ts_train, cs_train, self.lambda_)
+            loss = self._inner_loop(X_train[:, 0], ys, ws)
             losses.append(loss)
 
         # if self.output_file is not None:

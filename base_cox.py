@@ -21,16 +21,16 @@ State = chex.ArrayTree
 @dataclass
 class ConfigParams:
     """A structure for configuration"""
-    horizon: int
-    path_data: str
     dataset_name: str
     batch_size: int
     learning_rate: float
     log_interval: int
     weight_decay: float
     num_epochs: int
+    dataset_kwargs: dict
     landmark: bool = False
     output_file: str = None
+    # horizon: int
 
     @classmethod
     def from_dict(cls, env):    
@@ -64,19 +64,18 @@ class BaseSA:
 
         # Config
         self.config = ConfigParams.from_dict(config_kwargs)
-        H = self.config.horizon
+        H = self.config.dataset_kwargs['horizon']
+        self.horizon = H
 
         # Random key
         self._key = jax.random.PRNGKey(seed)
 
         # dataset info
-        path_data = self.config.path_data
-        seqs, target, mask, ts, cs = get_data(path_data, landmark=self.config.landmark)
+        seqs, ts, cs = get_data(self.config.dataset_name, self.config.dataset_kwargs)
+        
         n = seqs.shape[0]
-        seqs = jnp.concatenate((seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
+        # seqs = jnp.concatenate((seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
         self.data = {'seqs': seqs,
-                     'target': target,
-                     'mask': mask,
                      'ts': ts,
                      'cs': cs}
         dim = seqs.shape[-1]
@@ -147,21 +146,6 @@ class BaseSA:
 
         self.update = jax.jit(update)
 
-    def _get_train_test(self):
-        subkey = self._next_rng_key()
-        X_train, X_test, y_train, y_test, m_train, m_test,\
-             ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
-                                                                             self.data['target'],
-                                                                             self.data['mask'],
-                                                                             rng=subkey)
-        subkey = self._next_rng_key()
-        train_gen = DataGenerator(X_train, y_train, m_train,
-                                  ts_train, cs_train, self.config.batch_size, subkey)
-        subkey = self._next_rng_key()
-        test_gen = DataGenerator(X_test, y_test, m_test, 
-                                 ts_test, cs_test, self.config.batch_size, subkey)
-        return train_gen, test_gen
-
     def _next_rng_key(self) -> chex.PRNGKey:
         """Get the next rng subkey from class rngkey.
         Must *not* be called from under a jitted function!
@@ -170,39 +154,6 @@ class BaseSA:
         """
         self._key, subkey = jax.random.split(self._key)
         return subkey
-
-    def train(self):
-        """Training loop"""
-        train_loss = []
-        test_loss = []
-
-        train_gen, test_gen = self._get_train_test()
-        for epoch in range(self.config.num_epochs):
-            tr_loss = self.train_step(train_gen)
-            te_loss = self.test_step(test_gen)
-            train_loss.append(tr_loss)
-            test_loss.append(te_loss)
-
-            # log
-            if epoch % self.config.log_interval == 0:
-                print(f"Epoch: {epoch+1}/{self.config.num_epochs}")
-                print(f"Train classification loss: {tr_loss:.3f} at epoch {epoch}")
-                print(f"Test classification loss {te_loss:.3f} at epoch {epoch}")
-                print()
-
-        if self.output_file is not None:
-            if not os.path.exists(self.output_file):
-                os.makedirs(self.output_file)
-            path_model = os.path.join(self.output_file, 'model.pt')
-            path_state = os.path.join(self.output_file, 'state.pt')
-            path_csv = os.path.join(self.output_file, 'result.csv')
-            pickle.dump(self.state.params, open(path_model, 'wb'))
-            pickle.dump(self.state.opt_state, open(path_state, 'wb'))
-            df = pd.DataFrame({
-                "train_classif_loss": train_loss,
-                "test_classif_loss": test_loss,
-            })
-            df.to_csv(path_csv)
 
     def train_step(self, train_gen):
         epoch_loss = 0.0

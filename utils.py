@@ -1,4 +1,6 @@
 from math import ceil
+import os
+import h5py
 from pickle import load
 import jax
 import jax.numpy as jnp
@@ -31,7 +33,52 @@ def get_target_and_mask(seq, t, c, landmark=False):
     return target, mask
 
 
-def get_data(data_path, landmark):
+def pad_sequences(seqs, max_length):
+    num_sequences = len(seqs)
+    dim = seqs[0].shape[-1]
+    padded_sequences = jnp.full((num_sequences, max_length, dim), 0.0, dtype=jnp.float32)
+
+    for i, sequence in enumerate(seqs):
+        length = jnp.minimum(sequence.shape[0], max_length)
+        padded_sequences = padded_sequences.at[i, :length, :].set(sequence[:length])
+
+    return padded_sequences
+
+
+def get_data(dataset_name, kwargs):
+    loaders = {'aids': get_data_baseline,
+               'single_task': get_single_task_dataset,
+               }
+    
+    try:
+        return loaders[dataset_name](**kwargs)
+    except KeyError:
+        raise Exception('type of dataset not found.')
+
+
+def get_single_task_dataset(task_id, data_path, horizon, pad=True):
+    seqs = []
+    for root, dirs, files in os.walk(data_path):
+        for filename in files:
+            if filename.endswith('.mat') and 'task_{}'.format(task_id) in filename:
+                file_path = os.path.join(root, filename)
+                with h5py.File(file_path, 'r') as f:
+                    if 'traces_self' in f:
+                        size = f['traces_self'].shape[0]
+                        # Extract the array under the 'traces_self' key
+                        t_self = [f['traces_self'][i].reshape(-1, 39) for i in range(size)]
+                        seqs.extend(t_self)
+
+    ts = jnp.array([len(arr) for arr in seqs])
+    cs = jnp.where(ts < horizon, 1, 0)
+    ts = ts - cs.astype(jnp.int32)
+    if pad:
+        seqs = pad_sequences(seqs, horizon)
+    
+    return seqs, ts, cs
+
+
+def get_data_baseline(data_path, landmark):
     data = load(open(data_path, 'rb'))
     seqs = jnp.array(data['seqs'])
     cs = jnp.array(data['cs'])

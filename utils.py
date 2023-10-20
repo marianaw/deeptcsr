@@ -70,7 +70,7 @@ def get_single_task_dataset(task_id, data_path, horizon, pad=True):
                         seqs.extend(t_self)
 
     ts = jnp.array([len(arr) for arr in seqs])
-    cs = jnp.where(ts < horizon, 1, 0)
+    cs = jnp.where(ts > horizon, 1, 0)
     ts = ts - cs.astype(jnp.int32)
     if pad:
         seqs = pad_sequences(seqs, horizon)

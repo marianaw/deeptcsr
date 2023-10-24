@@ -17,7 +17,9 @@ Params = chex.ArrayTree
 PRNGKey = chex.PRNGKey
 State = chex.ArrayTree
 
-#Config params
+# Config params
+
+
 @dataclass
 class ConfigParams:
     """A structure for configuration"""
@@ -33,17 +35,17 @@ class ConfigParams:
     output_file: str = None
 
     @classmethod
-    def from_dict(cls, env):    
+    def from_dict(cls, env):
         """To ignore args that are not in the class,
         see https://stackoverflow.com/questions/54678337/how-does-one-ignore-extra-arguments-passed-to-a-dataclass
-        """  
+        """
         return cls(**{
-            k: v for k, v in env.items() 
+            k: v for k, v in env.items()
             if k in inspect.signature(cls).parameters
         })
 
 
-#Model state
+# Model state
 @chex.dataclass(frozen=True)
 class ModelState:
     """A structure of the current model state"""
@@ -71,16 +73,18 @@ class SA:
 
         # dataset info
         path_data = self.config.path_data
-        seqs, target, mask, ts, cs = get_data(path_data, landmark=self.config.landmark)
+        seqs, target, mask, ts, cs = get_data(
+            path_data, landmark=self.config.landmark)
         n = seqs.shape[0]
-        seqs = jnp.concatenate((seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
+        seqs = jnp.concatenate(
+            (seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
         self.data = {'seqs': seqs,
                      'target': target,
                      'mask': mask,
                      'ts': ts,
                      'cs': cs}
         dim = seqs.shape[-1]
-        
+
         # Encoder
         def forward_fn(x):
             linear = hk.Linear(1, name='feature_ext')
@@ -98,10 +102,9 @@ class SA:
 
         # Online encoder update
         optimizer = optax.adamw(learning_rate=self.config.learning_rate,
-                                    weight_decay=self.config.weight_decay)
+                                weight_decay=self.config.weight_decay)
         opt_state = optimizer.init(params)
         online_enc_update = get_update_and_apply(optimizer)
-
 
         # State of the model
         self.state = ModelState(
@@ -154,15 +157,15 @@ class SA:
     def _get_train_test(self):
         subkey = self._next_rng_key()
         X_train, X_test, y_train, y_test, m_train, m_test,\
-             ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
-                                                                             self.data['target'],
-                                                                             self.data['mask'],
-                                                                             rng=subkey)
+            ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
+                                                                    self.data['target'],
+                                                                    self.data['mask'],
+                                                                    rng=subkey)
         subkey = self._next_rng_key()
         train_gen = DataGenerator(X_train, y_train, m_train,
                                   ts_train, cs_train, self.config.batch_size, subkey)
         subkey = self._next_rng_key()
-        test_gen = DataGenerator(X_test, y_test, m_test, 
+        test_gen = DataGenerator(X_test, y_test, m_test,
                                  ts_test, cs_test, self.config.batch_size, subkey)
         return train_gen, test_gen
 
@@ -190,8 +193,10 @@ class SA:
             # log
             if epoch % self.config.log_interval == 0:
                 print(f"Epoch: {epoch+1}/{self.config.num_epochs}")
-                print(f"Train classification loss: {tr_loss:.3f} at epoch {epoch}")
-                print(f"Test classification loss {te_loss:.3f} at epoch {epoch}")
+                print(
+                    f"Train classification loss: {tr_loss:.3f} at epoch {epoch}")
+                print(
+                    f"Test classification loss {te_loss:.3f} at epoch {epoch}")
                 print()
 
         if self.output_file is not None:
@@ -231,7 +236,7 @@ class SA:
         epoch_loss = 0.0
         count = 0
         for X, y, m in test_gen:
-           
+
             # Get validation and test stats
             out = self.forward(
                 params=self.state.params,
@@ -244,7 +249,7 @@ class SA:
         epoch_loss /= count
         test_gen.reset()
         return epoch_loss
-    
+
     def survival_curve(self, xs):
         """Compute the fixed-horizon survival CCDF, a.k.a. survival curve.
 
@@ -255,11 +260,12 @@ class SA:
 
         where `K` is the horizon.
         """
-        logits = self.forward(self.state.params, xs).squeeze() # We call this for the first state.
+        logits = self.forward(self.state.params, xs).squeeze(
+        )  # We call this for the first state.
         log_hs = jax.nn.log_sigmoid(logits)
         surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=1))
         return jnp.insert(surv, 0, 1.0, axis=1)
-    
+
     def integrated_brier_score(self, xs, ts, cs):
         """Compute the integrated Brier score."""
         cs = cs.astype(jnp.bool_)
@@ -270,7 +276,8 @@ class SA:
         for h in range(1, t_max + 1):
             # Sequences that terminated.
             idx = (ts <= h) & ~cs
-            tot += jnp.sum((1 / ws[ts[idx] - 1]) * (0.0 - surv[idx, h - 1]) ** 2)
+            tot += jnp.sum((1 / ws[ts[idx] - 1]) *
+                           (0.0 - surv[idx, h - 1]) ** 2)
             # Sequences that are still active.
             idx = (ts > h) | ((ts == h) & cs)
             tot += jnp.sum((1 / ws[h - 1]) * (1.0 - surv[idx, h - 1]) ** 2)

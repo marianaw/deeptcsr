@@ -6,7 +6,7 @@ import yaml
 import argparse
 import gc
 
-from cox import SA
+from lambda_cox import LambdaSA
 
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"  # see https://github.com/google/jax/discussions/6332#discussioncomment-1279991
@@ -31,11 +31,14 @@ if __name__ == '__main__':
     output_file = config['output_file'].format(exp_name)
     config['output_file'] = output_file
     
-    agent = SA(config, seed)
+    agent = LambdaSA(config, seed)
 
     try:
         agent.train()
-        copyfile(config_path, os.path.join(output_file, 'config.yaml'))
+        # copyfile(config_path, os.path.join(output_file, 'config.yaml'))
+        config_path = os.path.join(output_file, 'config.yaml')
+        with open(config_path, 'w') as outfile:
+            yaml.dump(config, outfile, default_flow_style=False)
     except KeyboardInterrupt:
         gc.collect()
         pass

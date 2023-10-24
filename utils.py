@@ -1,4 +1,6 @@
 from math import ceil
+import os
+import h5py
 from pickle import load
 import jax
 import jax.numpy as jnp
@@ -31,7 +33,52 @@ def get_target_and_mask(seq, t, c, landmark=False):
     return target, mask
 
 
-def get_data(data_path, landmark):
+def pad_sequences(seqs, max_length):
+    num_sequences = len(seqs)
+    dim = seqs[0].shape[-1]
+    padded_sequences = jnp.full((num_sequences, max_length, dim), 0.0, dtype=jnp.float32)
+
+    for i, sequence in enumerate(seqs):
+        length = jnp.minimum(sequence.shape[0], max_length)
+        padded_sequences = padded_sequences.at[i, :length, :].set(sequence[:length])
+
+    return padded_sequences
+
+
+def get_data(dataset_name, kwargs):
+    loaders = {'aids': get_data_baseline,
+               'single_task': get_single_task_dataset,
+               }
+    
+    try:
+        return loaders[dataset_name](**kwargs)
+    except KeyError:
+        raise Exception('type of dataset not found.')
+
+
+def get_single_task_dataset(task_id, data_path, horizon, pad=True):
+    seqs = []
+    for root, dirs, files in os.walk(data_path):
+        for filename in files:
+            if filename.endswith('.mat') and 'task_{}'.format(task_id) in filename:
+                file_path = os.path.join(root, filename)
+                with h5py.File(file_path, 'r') as f:
+                    if 'traces_self' in f:
+                        size = f['traces_self'].shape[0]
+                        # Extract the array under the 'traces_self' key
+                        t_self = [f['traces_self'][i].reshape(-1, 39) for i in range(size)]
+                        seqs.extend(t_self)
+
+    ts = jnp.array([len(arr) for arr in seqs])
+    cs = jnp.where(ts > horizon, 1, 0)
+    ts = ts - cs.astype(jnp.int32)
+    if pad:
+        seqs = pad_sequences(seqs, horizon)
+    
+    return seqs, ts, cs
+
+
+def get_data_baseline(data_path, landmark):
     data = load(open(data_path, 'rb'))
     seqs = jnp.array(data['seqs'])
     cs = jnp.array(data['cs'])
@@ -50,7 +97,7 @@ def get_data(data_path, landmark):
     return seqs, target, mask, ts, cs
 
 
-def train_test_split(X, y, mask, rng, test_size=0.2):
+def train_test_split(X, ts, cs, rng, test_size=0.2):
     # Shuffle the indices of the data
     num_samples = X.shape[0]
     shuffled_indices = jax.random.permutation(rng, jnp.arange(num_samples))
@@ -65,19 +112,22 @@ def train_test_split(X, y, mask, rng, test_size=0.2):
     # Use the indices to split the data
     X_train = X[train_indices]
     X_test = X[test_indices]
-    y_train = y[train_indices]
-    y_test = y[test_indices]
-    m_train = mask[train_indices]
-    m_test = mask[test_indices]
+    ts_train = ts[train_indices]
+    ts_test = ts[test_indices]
+    cs_train = cs[train_indices]
+    cs_test = cs[test_indices]
 
-    return X_train, X_test, y_train, y_test, m_train, m_test
+    return X_train, X_test, \
+        ts_train, ts_test, cs_train, cs_test
 
 
 class DataGenerator:
 
-    def __init__(self, X, y, mask, batch_size, rng, shuffle=True):
+    def __init__(self, X, y, mask, ts, cs, batch_size, rng, shuffle=True):
         self.X = X
         self.y = y
+        self.ts = ts
+        self.cs = cs
         self.mask = mask
         self.shuffle = shuffle
         self.rng = rng
@@ -160,3 +210,32 @@ def concordance_index(scores, ts, cs):
     # Thin wrapper around the `lifelines` implementation.
     cs = cs.astype(jnp.bool_)
     return _concordance_index(ts + cs, scores, ~cs)
+
+
+def unroll(seqs, ts, cs, compress=False):
+    """Unroll sequences.
+
+    This function transforms each sequence `(x1, x2, ..., xt)` into
+    subsequences `((x1, x2, ..., xt), (x2, ..., xt), ..., (xt,))`.
+
+    Note: the smallest subsequence always contains two observed states, whether
+    implicitly or explicitly.
+
+    - For uncensored sequences, the smallest subsequence is `(xt,)` and
+      implicitly accounts for the terminal state that follows.
+    - For censored sequences, the smallest subsequence is `(x{t-1}, xt)`.
+    """
+    cs = cs.astype(jnp.bool_)
+    seqs_ = jnp.copy(seqs)
+    ts_ = jnp.copy(ts)
+    cs_ = jnp.copy(cs)
+    for i in range(1, jnp.max(ts)):
+        idx = ts > i  # Indices of seqs whose successor state is observed.
+        new = jnp.zeros((jnp.sum(idx),) + seqs.shape[1:], dtype=seqs.dtype)
+        new = new.at[:, :-i].set(seqs[idx, i:])
+        seqs_ = jnp.concatenate((seqs_, new))
+        ts_ = jnp.concatenate((ts_, ts[idx] - i))
+        cs_ = jnp.concatenate((cs_, cs[idx]))
+    if compress:
+        return (seqs_[:,:2], ts_, cs_)
+    return (seqs_, ts_, cs_)

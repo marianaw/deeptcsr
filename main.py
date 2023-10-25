@@ -7,6 +7,7 @@ import argparse
 import gc
 
 from lambda_cox import LambdaSA
+from baseline_cox import SA
 
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"  # see https://github.com/google/jax/discussions/6332#discussioncomment-1279991
@@ -19,6 +20,8 @@ if __name__ == '__main__':
                         help='Path to configuration file.')
     parser.add_argument('--exp_name', type=str, default='exp_1', 
                         help='exp name')
+    parser.add_argument('--agent', type=str, default='SA',
+                        help='SA or LambdaSA')
     parser.add_argument('--seed', help='Experiment seed', type=int, default=42)
     args = parser.parse_args()
 
@@ -26,12 +29,18 @@ if __name__ == '__main__':
     config = yaml.load(open(config_path, 'r'), Loader=yaml.FullLoader)
     exp_name = args.exp_name
     seed = args.seed
+    type_agent = args.agent
 
     #Model parameters
     output_file = config['output_file'].format(exp_name)
     config['output_file'] = output_file
     
-    agent = LambdaSA(config, seed)
+    if type_agent == "SA":
+        agent = SA(config, seed)
+    elif type_agent == 'LambdaSA':
+        agent = LambdaSA(config, seed)
+    else:
+        raise Exception('Agent type not found')
 
     try:
         agent.train()

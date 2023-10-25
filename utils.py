@@ -7,9 +7,11 @@ import jax.numpy as jnp
 from lifelines.utils import concordance_index as _concordance_index
 
 
-def pad_to(x1, x2):
+def pad_to(x1, shape):
+
     a1, a2 = x1.shape
-    b1, b2 = x2.shape
+    b1, b2 = shape
+
     assert b2 >= a2 and b1 >= a1
 
     miss_cols = b2 - a2
@@ -19,17 +21,19 @@ def pad_to(x1, x2):
     res = jnp.vstack((res, jnp.zeros((miss_rows, b2))))
     return res
 
-def get_target_and_mask(seq, t, c, landmark=False):
-    target = jnp.zeros_like(seq)
+def get_single_target_and_mask(seq, t, c, landmark=False):
+    h, _ = seq.shape
+    target = jnp.zeros((h, h))
     if not c:
         target = jnp.eye(t)[::-1]
-        target = pad_to(target, seq)
+        target = pad_to(target, shape=(h, h))
     if landmark:
         # import ipdb;ipdb.set_trace()
-        mask = jnp.tril(jnp.ones_like(seq), -(t.item()-1))[::-1]
+        mask = jnp.tril(jnp.ones_like(target), -(t.item()-1))[::-1]
     else:
+        t = min(t, seq.shape[0])
         mask = jnp.ones((1, t))
-        mask = pad_to(mask, seq)
+        mask = pad_to(mask, shape=(h, h))
     return target, mask
 
 
@@ -45,18 +49,39 @@ def pad_sequences(seqs, max_length):
     return padded_sequences
 
 
-def get_data(dataset_name, kwargs):
+def get_data(dataset_name, landmark, kwargs):
     loaders = {'aids': get_data_baseline,
                'single_task': get_single_task_dataset,
                }
     
     try:
-        return loaders[dataset_name](**kwargs)
+        seqs, ts, cs = loaders[dataset_name](**kwargs)
+        target, mask = get_targets_and_masks(seqs, ts, cs, landmark)
     except KeyError:
         raise Exception('type of dataset not found.')
+    
+    return seqs, ts, cs, target, mask
+    
+
+def split_and_pad_last(arr, H=1000):
+    t, dim = arr.shape
+    n_splits = ceil(t/H)
+    indices = jnp.arange(1, n_splits) * H
+    arrs = jnp.array_split(arr, indices_or_sections=indices)
+    last = arrs[-1]
+    h, _ = last.shape
+    if h < H:
+        zs = jnp.zeros((H-h, dim))
+        last = jnp.concatenate((last, zs))
+    arr = jnp.stack(arrs[:-1] + [last])
+
+    ts = t - indices
+    ts = jnp.hstack((jnp.array([t]), ts))
+    cs = jnp.hstack((jnp.ones_like(indices), jnp.array([0]))).astype(jnp.bool_)
+    return arr, ts, cs
 
 
-def get_single_task_dataset(task_id, data_path, horizon, pad=True):
+def get_single_task_dataset(task_id, data_path, horizon, split=True, pad=False):
     seqs = []
     for root, dirs, files in os.walk(data_path):
         for filename in files:
@@ -68,14 +93,39 @@ def get_single_task_dataset(task_id, data_path, horizon, pad=True):
                         # Extract the array under the 'traces_self' key
                         t_self = [f['traces_self'][i].reshape(-1, 39) for i in range(size)]
                         seqs.extend(t_self)
-
-    ts = jnp.array([len(arr) for arr in seqs])
-    cs = jnp.where(ts > horizon, 1, 0)
-    ts = ts - cs.astype(jnp.int32)
     if pad:
         seqs = pad_sequences(seqs, horizon)
+
+    if split:
+        arrs, tss, css = [], [], []
+        for seq in seqs:
+            arr, ts, cs = split_and_pad_last(seq, horizon)
+            arrs.append(arr)
+            css.append(cs)
+            tss.append(ts)
+        seqs = jnp.vstack(arrs)
+        ts = jnp.hstack(tss)
+        cs = jnp.hstack(css)
+
+    else:
+        ts = jnp.array([len(arr) for arr in seqs])
+        cs = jnp.where(ts > horizon, 1, 0)
     
+    ts = ts - cs.astype(jnp.int32)
     return seqs, ts, cs
+
+
+def get_targets_and_masks(seqs, ts, cs, landmark):
+    masks = []
+    targets = []
+    for seq, t, c in zip(seqs, ts, cs):
+        target, mask = get_single_target_and_mask(seq, t, c, landmark=landmark)
+        targets.append(target)
+        masks.append(mask)
+    
+    target = jnp.stack(targets)
+    mask = jnp.stack(masks)
+    return target, mask
 
 
 def get_data_baseline(data_path, landmark):
@@ -84,17 +134,7 @@ def get_data_baseline(data_path, landmark):
     cs = jnp.array(data['cs'])
     ts = jnp.array(data['ts'])
 
-    masks = []
-    targets = []
-    for seq, t, c in zip(seqs, ts, cs):
-        target, mask = get_target_and_mask(seq, t, c, landmark=landmark)
-        targets.append(target)
-        masks.append(mask)
-    
-    target = jnp.stack(targets)
-    mask = jnp.stack(masks)
-
-    return seqs, target, mask, ts, cs
+    return seqs, ts, cs
 
 
 def train_test_split(X, ts, cs, rng, test_size=0.2):
@@ -123,11 +163,11 @@ def train_test_split(X, ts, cs, rng, test_size=0.2):
 
 class DataGenerator:
 
-    def __init__(self, X, y, mask, ts, cs, batch_size, rng, shuffle=True):
+    def __init__(self, X, y, mask, batch_size, rng, shuffle=True):
         self.X = X
         self.y = y
-        self.ts = ts
-        self.cs = cs
+        # self.ts = ts
+        # self.cs = cs
         self.mask = mask
         self.shuffle = shuffle
         self.rng = rng

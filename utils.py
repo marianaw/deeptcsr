@@ -29,7 +29,7 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
         target = pad_to(target, shape=(h, h))
     if landmark:
         # import ipdb;ipdb.set_trace()
-        mask = jnp.tril(jnp.ones_like(target), -(t.item()-1))[::-1]
+        mask = jnp.tril(jnp.ones_like(target), -(target.shape[0]-t.item()))[::-1]
     else:
         t = min(t, seq.shape[0])
         mask = jnp.ones((1, t))

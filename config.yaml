@@ -6,7 +6,7 @@ log_interval: 10
 weight_decay: 1.e-5
 num_epochs: 101
 output_file: Results/task_4/{}/
-landmark: False
+landmark: True
 
 dataset_kwargs:
   horizon: 100

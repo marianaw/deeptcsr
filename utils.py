@@ -128,7 +128,7 @@ def get_targets_and_masks(seqs, ts, cs, landmark):
     return target, mask
 
 
-def get_data_baseline(data_path, landmark):
+def get_data_baseline(data_path, horizon=None):
     data = load(open(data_path, 'rb'))
     seqs = jnp.array(data['seqs'])
     cs = jnp.array(data['cs'])

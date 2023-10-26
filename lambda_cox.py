@@ -24,12 +24,14 @@ class LambdaSA(BaseSA):
 
     def _get_train_test(self, test_size=0.2):
         subkey = self._next_rng_key()
-        X_train, X_test,\
-            ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
-                                                                    self.data['ts'],
-                                                                    self.data['cs'],
-                                                                    rng=subkey,
-                                                                    test_size=test_size)
+        X_train, X_test, _, _, _, _,\
+           ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
+                               self.data['target'],
+                               self.data['mask'],
+                               self.data['ts'],
+                               self.data['cs'],
+                               rng=subkey,
+                               test_size=test_size)
         if self.config.landmark:
             X_train, ts_train, cs_train = unroll(X_train, ts_train, cs_train)
             X_test, ts_test, cs_test = unroll(X_test, ts_test, cs_test)
@@ -65,9 +67,6 @@ class LambdaSA(BaseSA):
         return (ys, ws)
 
     def _update_target(self, seqs, ts, cs, lambda_):
-        # seqs = self.data['seqs']
-        # ts = self.data['ts']
-        # cs = self.data['cs']
 
         H = self.horizon
         cs = cs.astype(bool)

@@ -10,7 +10,7 @@ landmark: False
 
 dataset_kwargs:
   horizon: 100
-  task_id: 4
+  task_id: 10
   # data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/train
   data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1/train
 

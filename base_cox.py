@@ -1,3 +1,4 @@
+from functools import partial
 from dataclasses import dataclass
 import inspect
 import os
@@ -213,8 +214,32 @@ class BaseSA:
         log_hs = jax.nn.log_sigmoid(logits)
         surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=1))
         return jnp.insert(surv, 0, 1.0, axis=1)
+    
+    def brier_score(self, seqs, ts, cs, h):
+        cs = cs.astype(jnp.bool_)
+        surv = self.survival_curve(seqs)
+        ws = kaplan_meier(ts - ~cs, ~cs)
+        
+        # Sequences that terminated.
+        mask = jnp.where((ts <= h) & ~cs, 1, 0)
+        tot = jnp.sum((1/ws[ts-1]) * (0.0 - surv[:, h-1])**2 * mask)
+        
+        # Sequences that are still active.
+        mask = jnp.where((ts > h) | ((ts == h) & cs), 1, 0)
+        aux = jnp.sum((1 / ws[h - 1]) * (1.0 - surv[:, h - 1]) ** 2 * mask)
+        aux = jnp.where(jnp.isinf(aux), 0, aux)
+        aux = jnp.where(jnp.isnan(aux), 0, aux)
+        tot += aux
+        return tot
 
     def integrated_brier_score(self, xs, ts, cs):
+        brier = partial(self.brier_score, xs, ts, cs)
+        f = jax.vmap(brier)
+        t_max = jnp.max(ts)
+        hs = jnp.arange(1, t_max+1)
+        return jnp.sum(f(hs)/ (t_max * len(ts)))
+
+    def old_integrated_brier_score(self, xs, ts, cs):
         """Compute the integrated Brier score."""
         cs = cs.astype(jnp.bool_)
         surv = self.survival_curve(xs)

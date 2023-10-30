@@ -81,7 +81,7 @@ def split_and_pad_last(arr, H=1000):
     return arr, ts, cs
 
 
-def get_single_task_dataset(task_id, data_path, horizon, split=True, pad=False):
+def get_single_task_dataset(task_id, data_path, horizon=None, split=True, pad=False):
     seqs = []
     for root, dirs, files in os.walk(data_path):
         for filename in files:
@@ -93,9 +93,7 @@ def get_single_task_dataset(task_id, data_path, horizon, split=True, pad=False):
                         # Extract the array under the 'traces_self' key
                         t_self = [f['traces_self'][i].reshape(-1, 39) for i in range(size)]
                         seqs.extend(t_self)
-    if pad:
-        seqs = pad_sequences(seqs, horizon)
-
+    
     if split:
         arrs, tss, css = [], [], []
         for seq in seqs:
@@ -109,8 +107,13 @@ def get_single_task_dataset(task_id, data_path, horizon, split=True, pad=False):
 
     else:
         ts = jnp.array([len(arr) for arr in seqs])
+        horizon = jnp.max(ts) if horizon is None else horizon
         cs = jnp.where(ts > horizon, 1, 0)
+        pad = True
     
+    if pad:
+        seqs = pad_sequences(seqs, horizon)
+
     ts = ts - cs.astype(jnp.int32)
     return seqs, ts, cs
 
@@ -283,3 +286,7 @@ def unroll(seqs, ts, cs, compress=False):
     if compress:
         return (seqs_[:,:2], ts_, cs_)
     return (seqs_, ts_, cs_)
+
+
+def score(beta, xs):
+    return -jnp.dot(xs, beta)

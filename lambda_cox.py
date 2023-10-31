@@ -22,7 +22,7 @@ class LambdaSA(BaseSA):
         self.lambda_ = new_config.lambda_
         self.num_steps = new_config.num_steps
 
-    def _get_train_test(self, test_size=0.2):
+    def get_train_test(self, test_size=0.2):
         subkey = self._next_rng_key()
         X_train, X_test, _, _, _, _,\
            ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
@@ -103,17 +103,18 @@ class LambdaSA(BaseSA):
             )
 
             # log
-            # if epoch % self.config.log_interval == 0:
-            #     print(f"Epoch: {epoch+1}/{self.config.num_epochs}")
-            #     print(f"Train classification loss: {loss.item():.3f} at epoch {epoch}")
-            #     print()
+            if epoch % self.config.log_interval == 0:
+                print(f"Epoch: {epoch+1}/{self.config.num_epochs}")
+                print(f"Train classification loss: {loss.item():.3f} at epoch {epoch}")
+                print()
             epoch_loss.append(loss.item())
 
         return epoch_loss
 
-    def train(self, X_train, ts_train, cs_train):
+    def train(self, X_train=None, ts_train=None, cs_train=None):
 
-        # X_train, X_test, ts_train, ts_test, cs_train, cs_test = self._get_train_test()
+        if X_train is None or ts_train is None or cs_train is None:
+            X_train, _, ts_train, _, cs_train, _ = self.get_train_test()
 
         # Outer loop
         losses = []

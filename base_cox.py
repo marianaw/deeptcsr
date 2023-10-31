@@ -1,3 +1,4 @@
+from functools import partial
 from dataclasses import dataclass
 import inspect
 import os
@@ -17,7 +18,9 @@ Params = chex.ArrayTree
 PRNGKey = chex.PRNGKey
 State = chex.ArrayTree
 
-#Config params
+# Config params
+
+
 @dataclass
 class ConfigParams:
     """A structure for configuration"""
@@ -33,17 +36,17 @@ class ConfigParams:
     # horizon: int
 
     @classmethod
-    def from_dict(cls, env):    
+    def from_dict(cls, env):
         """To ignore args that are not in the class,
         see https://stackoverflow.com/questions/54678337/how-does-one-ignore-extra-arguments-passed-to-a-dataclass
-        """  
+        """
         return cls(**{
-            k: v for k, v in env.items() 
+            k: v for k, v in env.items()
             if k in inspect.signature(cls).parameters
         })
 
 
-#Model state
+# Model state
 @chex.dataclass(frozen=True)
 class ModelState:
     """A structure of the current model state"""
@@ -71,15 +74,19 @@ class BaseSA:
         self._key = jax.random.PRNGKey(seed)
 
         # dataset info
-        seqs, ts, cs = get_data(self.config.dataset_name, self.config.dataset_kwargs)
-        
+        seqs, ts, cs, target, mask = get_data(self.config.dataset_name,
+                                              self.config.landmark,
+                                              self.config.dataset_kwargs)
+
         n = seqs.shape[0]
         # seqs = jnp.concatenate((seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
         self.data = {'seqs': seqs,
                      'ts': ts,
-                     'cs': cs}
+                     'cs': cs,
+                     'target': target,
+                     'mask': mask}
         dim = seqs.shape[-1]
-        
+
         # Encoder
         def forward_fn(x):
             cox = CoxLinearModel(dim, H)
@@ -94,7 +101,7 @@ class BaseSA:
 
         # Online encoder update
         optimizer = optax.adamw(learning_rate=self.config.learning_rate,
-                                    weight_decay=self.config.weight_decay)
+                                weight_decay=self.config.weight_decay)
         opt_state = optimizer.init(params)
         online_enc_update = get_update_and_apply(optimizer)
 
@@ -178,7 +185,7 @@ class BaseSA:
         epoch_loss = 0.0
         count = 0
         for X, y, m in test_gen:
-           
+
             # Get validation and test stats
             out = self.forward(
                 params=self.state.params,
@@ -191,7 +198,7 @@ class BaseSA:
         epoch_loss /= count
         test_gen.reset()
         return epoch_loss
-    
+
     def survival_curve(self, xs):
         """Compute the fixed-horizon survival CCDF, a.k.a. survival curve.
 
@@ -202,12 +209,37 @@ class BaseSA:
 
         where `K` is the horizon.
         """
-        logits = self.forward(self.state.params, xs).squeeze() # We call this for the first state.
+        logits = self.forward(self.state.params, xs).squeeze(
+        )  # We call this for the first state.
         log_hs = jax.nn.log_sigmoid(logits)
         surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=1))
         return jnp.insert(surv, 0, 1.0, axis=1)
     
+    def brier_score(self, seqs, ts, cs, h):
+        cs = cs.astype(jnp.bool_)
+        surv = self.survival_curve(seqs)
+        ws = kaplan_meier(ts - ~cs, ~cs)
+        
+        # Sequences that terminated.
+        mask = jnp.where((ts <= h) & ~cs, 1, 0)
+        tot = jnp.sum((1/ws[ts-1]) * (0.0 - surv[:, h-1])**2 * mask)
+        
+        # Sequences that are still active.
+        mask = jnp.where((ts > h) | ((ts == h) & cs), 1, 0)
+        aux = jnp.sum((1 / ws[h - 1]) * (1.0 - surv[:, h - 1]) ** 2 * mask)
+        aux = jnp.where(jnp.isinf(aux), 0, aux)
+        aux = jnp.where(jnp.isnan(aux), 0, aux)
+        tot += aux
+        return tot
+
     def integrated_brier_score(self, xs, ts, cs):
+        brier = partial(self.brier_score, xs, ts, cs)
+        f = jax.vmap(brier)
+        t_max = jnp.max(ts)
+        hs = jnp.arange(1, t_max+1)
+        return jnp.sum(f(hs)/ (t_max * len(ts)))
+
+    def old_integrated_brier_score(self, xs, ts, cs):
         """Compute the integrated Brier score."""
         cs = cs.astype(jnp.bool_)
         surv = self.survival_curve(xs)
@@ -217,7 +249,8 @@ class BaseSA:
         for h in range(1, t_max + 1):
             # Sequences that terminated.
             idx = (ts <= h) & ~cs
-            tot += jnp.sum((1 / ws[ts[idx] - 1]) * (0.0 - surv[idx, h - 1]) ** 2)
+            tot += jnp.sum((1 / ws[ts[idx] - 1]) *
+                           (0.0 - surv[idx, h - 1]) ** 2)
             # Sequences that are still active.
             idx = (ts > h) | ((ts == h) & cs)
             tot += jnp.sum((1 / ws[h - 1]) * (1.0 - surv[idx, h - 1]) ** 2)

@@ -23,14 +23,13 @@ State = chex.ArrayTree
 @dataclass
 class ConfigParams:
     """A structure for configuration"""
-    horizon: int
-    path_data: str
     dataset_name: str
     batch_size: int
     learning_rate: float
     log_interval: int
     weight_decay: float
     num_epochs: int
+    dataset_kwargs: dict
     landmark: bool = False
     output_file: str = None
 
@@ -66,18 +65,20 @@ class SA:
 
         # Config
         self.config = ConfigParams.from_dict(config_kwargs)
-        H = self.config.horizon
+        H = self.config.dataset_kwargs['horizon']
+        self.horizon = H
+
 
         # Random key
         self._key = jax.random.PRNGKey(seed)
 
         # dataset info
-        path_data = self.config.path_data
-        seqs, target, mask, ts, cs = get_data(
+        seqs, ts, cs, target, mask = get_data(
             path_data, landmark=self.config.landmark)
+
         n = seqs.shape[0]
-        seqs = jnp.concatenate(
-            (seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
+        # seqs = jnp.concatenate(
+        #     (seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
         self.data = {'seqs': seqs,
                      'target': target,
                      'mask': mask,
@@ -157,16 +158,16 @@ class SA:
     def _get_train_test(self):
         subkey = self._next_rng_key()
         X_train, X_test, y_train, y_test, m_train, m_test,\
-            ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
-                                                                    self.data['target'],
-                                                                    self.data['mask'],
-                                                                    rng=subkey)
+            = train_test_split(self.data['seqs'],
+                               self.data['target'],
+                               self.data['mask'],
+                               rng=subkey)
         subkey = self._next_rng_key()
         train_gen = DataGenerator(X_train, y_train, m_train,
-                                  ts_train, cs_train, self.config.batch_size, subkey)
+                                  self.config.batch_size, subkey)
         subkey = self._next_rng_key()
         test_gen = DataGenerator(X_test, y_test, m_test,
-                                 ts_test, cs_test, self.config.batch_size, subkey)
+                                 self.config.batch_size, subkey)
         return train_gen, test_gen
 
     def _next_rng_key(self) -> chex.PRNGKey:

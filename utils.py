@@ -21,30 +21,42 @@ def pad_to(x1, shape):
     res = jnp.vstack((res, jnp.zeros((miss_rows, b2))))
     return res
 
+
 def get_single_target_and_mask(seq, t, c, landmark=False):
     h, _ = seq.shape
     target = jnp.zeros((h, h))
-    if not c:
+    h_ws = jnp.ones((h, h))
+    if not c:  # Subject reached terminal state within the horizon.
         target = jnp.eye(t)[::-1]
         target = pad_to(target, shape=(h, h))
-    if landmark:
-        # import ipdb;ipdb.set_trace()
-        mask = jnp.tril(jnp.ones_like(target), -(target.shape[0]-t.item()))[::-1]
-    else:
-        t = min(t, seq.shape[0])
-        mask = jnp.ones((1, t))
-        mask = pad_to(mask, shape=(h, h))
-    return target, mask
+        if landmark:
+            h_ws = jnp.ones_like(target)
+            tt = t.item()
+            if tt <= h:
+                h_ws = jnp.tril(jnp.ones_like(target), -(h-t.item()))[::-1]
+        else:
+            t = min(t, seq.shape[0])
+            h_ws = jnp.ones((1, t))
+            h_ws = pad_to(h_ws, shape=(h, h))
+    
+    mask = jnp.ones_like(target)
+    if t < h:
+        mask_out = h - t
+        mask = mask.at[t:, :].set(jnp.zeros((mask_out, h)))
+
+    return target, h_ws, mask
 
 
 def pad_sequences(seqs, max_length):
     num_sequences = len(seqs)
     dim = seqs[0].shape[-1]
-    padded_sequences = jnp.full((num_sequences, max_length, dim), 0.0, dtype=jnp.float32)
+    padded_sequences = jnp.full(
+        (num_sequences, max_length, dim), 0.0, dtype=jnp.float32)
 
     for i, sequence in enumerate(seqs):
         length = jnp.minimum(sequence.shape[0], max_length)
-        padded_sequences = padded_sequences.at[i, :length, :].set(sequence[:length])
+        padded_sequences = padded_sequences.at[i, :length, :].set(
+            sequence[:length])
 
     return padded_sequences
 
@@ -53,15 +65,15 @@ def get_data(dataset_name, landmark, kwargs):
     loaders = {'aids': get_data_baseline,
                'single_task': get_single_task_dataset,
                }
-    
+
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)
-        target, mask = get_targets_and_masks(seqs, ts, cs, landmark)
+        target, h_ws, mask = get_targets_and_masks(seqs, ts, cs, landmark)
     except KeyError:
         raise Exception('type of dataset not found.')
-    
-    return seqs, ts, cs, target, mask
-    
+
+    return seqs, ts, cs, target, h_ws, mask
+
 
 def split_and_pad_last(arr, H=1000):
     t, dim = arr.shape
@@ -91,9 +103,10 @@ def get_single_task_dataset(task_id, data_path, horizon=None, split=True, pad=Fa
                     if 'traces_self' in f:
                         size = f['traces_self'].shape[0]
                         # Extract the array under the 'traces_self' key
-                        t_self = [f['traces_self'][i].reshape(-1, 39) for i in range(size)]
+                        t_self = [f['traces_self']
+                                  [i].reshape(-1, 39) for i in range(size)]
                         seqs.extend(t_self)
-    
+
     if split:
         arrs, tss, css = [], [], []
         for seq in seqs:
@@ -110,7 +123,7 @@ def get_single_task_dataset(task_id, data_path, horizon=None, split=True, pad=Fa
         horizon = jnp.max(ts) if horizon is None else horizon
         cs = jnp.where(ts > horizon, 1, 0)
         pad = True
-    
+
     if pad:
         seqs = pad_sequences(seqs, horizon)
 
@@ -120,15 +133,18 @@ def get_single_task_dataset(task_id, data_path, horizon=None, split=True, pad=Fa
 
 def get_targets_and_masks(seqs, ts, cs, landmark):
     masks = []
+    h_ws = []
     targets = []
     for seq, t, c in zip(seqs, ts, cs):
-        target, mask = get_single_target_and_mask(seq, t, c, landmark=landmark)
+        target, h_w, mask = get_single_target_and_mask(seq, t, c, landmark=landmark)
         targets.append(target)
+        h_ws.append(h_w)
         masks.append(mask)
-    
+
     target = jnp.stack(targets)
     mask = jnp.stack(masks)
-    return target, mask
+    h_ws = jnp.stack(h_ws)
+    return target, h_ws, mask
 
 
 def get_data_baseline(data_path, horizon=None):
@@ -140,7 +156,7 @@ def get_data_baseline(data_path, horizon=None):
     return seqs, ts, cs
 
 
-def train_test_split(X, target, mask, ts, cs, rng, test_size=0.2):
+def train_test_split(X, target, h_ws, mask, ts, cs, rng, test_size=0.2):
     # Shuffle the indices of the data
     num_samples = X.shape[0]
     shuffled_indices = jax.random.permutation(rng, jnp.arange(num_samples))
@@ -157,6 +173,8 @@ def train_test_split(X, target, mask, ts, cs, rng, test_size=0.2):
     X_test = X[test_indices]
     y_train = target[train_indices]
     y_test = target[test_indices]
+    hws_train = h_ws[train_indices]
+    hws_test = h_ws[test_indices]
     m_train = mask[train_indices]
     m_test = mask[test_indices]
     ts_train = ts[train_indices]
@@ -164,13 +182,13 @@ def train_test_split(X, target, mask, ts, cs, rng, test_size=0.2):
     cs_train = cs[train_indices]
     cs_test = cs[test_indices]
 
-    return X_train, X_test, \
-        y_train, y_test, m_train, m_test, ts_train, ts_test, cs_train, cs_test
+    return X_train, X_test, y_train, y_test, hws_train, hws_test,\
+        m_train, m_test, ts_train, ts_test, cs_train, cs_test
 
 
-class DataGenerator:
+class BaseDataGenerator:
 
-    def __init__(self, X, ts, cs, y, mask, batch_size, rng, shuffle=True):
+    def __init__(self, X, ts, cs, y, mask, batch_size, rng, h_ws=None, shuffle=True):
         self.X = X
         self.y = y
         self.ts = ts
@@ -179,8 +197,28 @@ class DataGenerator:
         self.shuffle = shuffle
         self.rng = rng
         self.batch_size = batch_size
+        self.h_ws =  h_ws
         self.generator = self.batch_generator()
 
+    def batch_generator(self):
+        raise NotImplementedError
+
+    def __iter__(self):
+        return self
+
+    def __len__(self):
+        return ceil(len(self.X)/self.batch_size)
+
+    def reset(self):
+        self.generator = self.batch_generator()
+
+    def __next__(self):
+        # try:
+        batch_X, batch_y, batch_m = next(self.generator)
+        return batch_X, batch_y, batch_m
+
+
+class TgtMskDataGenerator(BaseDataGenerator):
     def batch_generator(self):
         X = self.X
         y = self.y
@@ -188,11 +226,12 @@ class DataGenerator:
         batch_size = self.batch_size
         rng = self.rng
         num_samples = X.shape[0]
-        
+
         # Shuffle the data using the same random key for X and y if shuffle is True
         if self.shuffle:
             rng, subkey = jax.random.split(rng)
-            permutation = jax.random.permutation(subkey, jnp.arange(num_samples))
+            permutation = jax.random.permutation(
+                subkey, jnp.arange(num_samples))
             X = X[permutation]
             y = y[permutation]
             mask = mask[permutation]
@@ -202,29 +241,45 @@ class DataGenerator:
             batch_y = y[i:i + batch_size]
             batch_m = mask[i:i + batch_size]
             yield batch_X, batch_y, batch_m
-    
-    def __iter__(self):
-        return self
-    
-    def __len__(self):
-        return ceil(len(self.X)/self.batch_size)
-    
-    def reset(self):
-        self.generator = self.batch_generator()
-    
-    def __next__(self):
-        # try:
-        batch_X, batch_y, batch_m = next(self.generator)
-        return batch_X, batch_y, batch_m
-        # except StopIteration:
-            
-            # batch_X, batch_y, batch_m = next(self.generator)
-            # return batch_X, batch_y, batch_m
+
+
+class TimesDataGenerator(BaseDataGenerator):
+    def batch_generator(self):
+        X = self.X
+        ys = self.y
+        ts = self.ts
+        cs = self.cs
+        mask = self.mask
+        h_ws = self.h_ws
+        batch_size = self.batch_size
+        rng = self.rng
+        num_samples = X.shape[0]
+
+        # Shuffle the data using the same random key for X and y if shuffle is True
+        if self.shuffle:
+            rng, subkey = jax.random.split(rng)
+            permutation = jax.random.permutation(
+                subkey, jnp.arange(num_samples))
+            X = X[permutation]
+            cs = cs[permutation]
+            ts = ts[permutation]
+            ys = ys[permutation]
+            mask = mask[permutation]
+            h_ws = h_ws[permutation]
+
+        for i in range(0, num_samples, batch_size):
+            batch_X = X[i:i + batch_size]
+            batch_ts = ts[i:i + batch_size]
+            batch_cs = cs[i:i + batch_size]
+            batch_ys = ys[i:i + batch_size]
+            batch_m = mask[i:i + batch_size]
+            batch_hws = h_ws[i:i + batch_size]
+            yield batch_X, batch_ts, batch_cs, batch_ys, batch_m, batch_hws
 
 
 def batch_generator(X, y, mask, batch_size, rng, shuffle=True):
     num_samples = X.shape[0]
-    
+
     # Shuffle the data using the same random key for X and y if shuffle is True
     if shuffle:
         rng, subkey = jax.random.split(rng)
@@ -284,7 +339,7 @@ def unroll(seqs, ts, cs, compress=False):
         ts_ = jnp.concatenate((ts_, ts[idx] - i))
         cs_ = jnp.concatenate((cs_, cs[idx]))
     if compress:
-        return (seqs_[:,:2], ts_, cs_)
+        return (seqs_[:, :2], ts_, cs_)
     return (seqs_, ts_, cs_)
 
 

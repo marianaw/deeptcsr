@@ -13,9 +13,19 @@ class Config(ConfigParams):
     num_steps: int = 5
 
 
+@jax.jit
+def bce_logits(targets, logits):
+    """Compute the binary cross-entropy with logits.
+
+    Letting `p = targets` and `q = sigmoid(logits)`, this function returns the
+    binary cross-entropy `H(p, q) = -p * log(q) - (1 - p) * log(1 - q)`.
+    """
+    return -targets * logits + jax.nn.softplus(logits)
+
+
 class LambdaSA(BaseSA):
 
-    def __init__(self, config_kwargs, seed, name="SurvivalAnalysis", **kwargs):
+    def __init__(self, config_kwargs, seed, name="TCSR", **kwargs):
         super().__init__(config_kwargs, seed, name, **kwargs)
 
         new_config = Config.from_dict(config_kwargs)
@@ -74,7 +84,7 @@ class LambdaSA(BaseSA):
 
         # Exponentially decreasing multipliers.
         multipliers = lambda_ ** jnp.arange(H)
-        multipliers = multipliers.at[:-1].set(multipliers[:-1] * 1 - lambda_)
+        multipliers = multipliers.at[:-1].set(multipliers[:-1] * (1 - lambda_))
 
         ys = jnp.zeros((len(seqs), H))
         ws = jnp.zeros((len(seqs), H))

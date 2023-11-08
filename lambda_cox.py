@@ -113,7 +113,7 @@ class LambdaSA(BaseSA):
             )
 
             # log
-            if epoch % self.config.log_interval == 0:
+            if epoch % self.config.log_interval == 0 and epoch > 1:
                 print(f"Epoch: {epoch+1}/{self.config.num_epochs}")
                 print(f"Train classification loss: {loss.item():.3f} at epoch {epoch}")
                 print()

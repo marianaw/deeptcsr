@@ -26,7 +26,6 @@ class Config(ConfigParams):
     num_steps: int = 5
     target_lr: float = .0001
 
-
 # Model state
 @chex.dataclass(frozen=True)
 class ModelState:
@@ -78,7 +77,6 @@ def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T):
     return out
 
 
-@jax.jit
 def get_mapped_f_factory(f, lambda_, T, in_axis):
     single_f = partial(f, lambda_=lambda_, T=T)
     batched_f = jax.vmap(single_f, in_axes=in_axis)
@@ -97,20 +95,19 @@ class DeepLambdaSA(BaseSA):
         # Online and Target updates
         tgt_update = partial(
             optax.incremental_update,
-            step_size=self.config.target_lr
+            step_size=config.target_lr
         )
 
         online_enc_update = self.online_enc_update
 
-        # Online and Target initializations
-        _some_input = self.data['seqs'][:20]
-        _key = self._next_rng_key()
-        onl_params = self.forward.init(_key, _some_input)
-        tgt_params = self.forward.init(_key, _some_input)
-
         # State of the model
-        _, opt_state = self.state.values()
+        params, opt_state = self.state.values()
 
+        # Online and Target initializations
+        onl_params = params
+        tgt_params = jax.tree_map(jnp.copy, params)
+
+        # Update model state
         self.state = ModelState(
             onl_params=onl_params,
             tgt_params=tgt_params,
@@ -126,22 +123,27 @@ class DeepLambdaSA(BaseSA):
             h = get_tgt(s_tgt, ys)
             return h
 
-        self.get_targets = get_targets
+        self.get_targets = jax.jit(get_targets)
 
         # Function to get weights
         get_ws = get_mapped_f_factory(
                 _get_weights, self.lambda_, self.horizon, in_axis=(0, 0, 0, 0))
         
         def get_weights(X, ys, cs, h_ws):
-            s_ws = self.survival_curve(X)
+            logits = self.forward(self.state.tgt_params, X)
+            log_hs = jax.nn.log_sigmoid(logits)
+            surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=1))
+            s_ws = jnp.insert(surv, 0, 1.0, axis=-1)
+            s_ws = s_ws[:, :, :-1]
             w = get_ws(s_ws, h_ws, ys, cs)
             return w
         
-        self.get_weights = get_weights
+        self.get_weights = jax.jit(get_weights)
 
         # Losses
         def loss_fn(params, inputs, targets, ws, mask):
             logits = self.forward(params, inputs)
+            assert logits.shape == targets.shape
             loss = bce_logits(targets, logits)
             loss = jnp.mean(loss * ws * mask)
             return loss
@@ -159,6 +161,7 @@ class DeepLambdaSA(BaseSA):
                 onl_params,
                 inputs,
                 targets,
+                weights,
                 mask
             )
             # Update online encoder
@@ -210,7 +213,6 @@ class DeepLambdaSA(BaseSA):
         if train_gen is None:
             train_gen, _ = self.get_train_test()
 
-        # batch_X, batch_ts, batch_cs, batch_ys, batch_m, batch_hws
         losses = []
         for epoch in range(self.config.num_epochs):
             for seqs, ts, cs, ys, m, h_ws in train_gen:
@@ -228,13 +230,14 @@ class DeepLambdaSA(BaseSA):
                 )
 
                 # log
-                if epoch % self.config.log_interval == 0:
+                if epoch % self.config.log_interval == 0 and epoch > 1:
                     print(f"Epoch: {epoch+1}/{self.config.num_epochs}")
                     print(
                         f"Train classification loss: {loss.item():.3f} at epoch {epoch}")
                     print()
 
                 losses.append(loss.item())
+            train_gen.reset()
 
         # if self.output_file is not None:
         #     if not os.path.exists(self.output_file):

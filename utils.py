@@ -1,3 +1,4 @@
+from functools import partial
 from math import ceil
 import os
 import h5py
@@ -38,7 +39,7 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
             t = min(t, seq.shape[0])
             h_ws = jnp.ones((1, t))
             h_ws = pad_to(h_ws, shape=(h, h))
-    
+
     mask = jnp.ones_like(target)
     if t < h:
         mask_out = h - t
@@ -136,7 +137,8 @@ def get_targets_and_masks(seqs, ts, cs, landmark):
     h_ws = []
     targets = []
     for seq, t, c in zip(seqs, ts, cs):
-        target, h_w, mask = get_single_target_and_mask(seq, t, c, landmark=landmark)
+        target, h_w, mask = get_single_target_and_mask(
+            seq, t, c, landmark=landmark)
         targets.append(target)
         h_ws.append(h_w)
         masks.append(mask)
@@ -197,7 +199,7 @@ class BaseDataGenerator:
         self.shuffle = shuffle
         self.rng = rng
         self.batch_size = batch_size
-        self.h_ws =  h_ws
+        self.h_ws = h_ws
         self.generator = self.batch_generator()
 
     def batch_generator(self):
@@ -214,8 +216,8 @@ class BaseDataGenerator:
 
     def __next__(self):
         # try:
-        batch_X, batch_y, batch_m = next(self.generator)
-        return batch_X, batch_y, batch_m
+        batch = next(self.generator)
+        return batch
 
 
 class TgtMskDataGenerator(BaseDataGenerator):
@@ -345,3 +347,34 @@ def unroll(seqs, ts, cs, compress=False):
 
 def score(beta, xs):
     return -jnp.dot(xs, beta)
+
+
+def get_unroll_t(t, h):
+    def cumsub(res, el):
+        res = res - 1
+        res = jax.nn.relu(res)
+        return res, res
+
+    taux = jnp.zeros(h).at[0].set(t)
+    _, taux = jax.lax.scan(cumsub, t, taux)
+    taux = jnp.insert(taux[:-1], 0, t)
+    taux = taux.reshape(-1, 1)
+    return taux
+
+
+def get_unroll_ts(ts, h):
+    partial_get_unroll_t = partial(get_unroll_t, h=h)
+    get_ts = jax.vmap(partial_get_unroll_t)
+    unrolled = get_ts(ts)
+    return unrolled
+
+
+def unroll_time(xs, ts, cs, ms, T):
+    xs_ = xs.reshape(-1, xs.shape[-1])
+    ts_ = get_unroll_ts(ts, T)
+    ts_ = ts_.reshape(-1)
+    cs_ = cs_ = cs.reshape(-1, 1, 1)
+    cs_ = cs_.repeat(T, 1).reshape(-1)
+    ms_ = ms.any(-1, keepdims=True)
+    ms_ = ms_.reshape(-1)
+    return xs_, ts_, cs_, ms_

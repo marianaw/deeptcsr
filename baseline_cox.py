@@ -52,7 +52,7 @@ class SA(BaseSA):
     
     def get_train_test(self, test_size=.2):
         subkey = self._next_rng_key()
-        X_train, X_test, y_train, y_test, _, _, m_train, m_test,\
+        X_train, X_test, y_train, y_test, m_train, m_test, _, _,\
            ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
                                self.data['target'],
                                self.data['h_ws'],

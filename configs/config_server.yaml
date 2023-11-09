@@ -1,18 +1,17 @@
 dataset_name: single_task
-# path_data: /Users/mariana/Documents/projects/Huawei/tdsurv/data/aids-seqs.pkl
 batch_size: 32
 learning_rate: .01
 log_interval: 1000
 weight_decay: 1.e-5
-num_epochs: 500
-# output_file: Results/task_4/{}/
-landmark: False
+num_epochs: 2
+axis: 2
+landmark: True
+target_lr: .0001
 
 dataset_kwargs:
   horizon: 100
   task_id: 6
   data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
-  # data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1/train
 
 lambda_: 0.1
 num_steps: 5

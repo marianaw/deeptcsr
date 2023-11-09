@@ -125,9 +125,10 @@ class HorizonBias(hk.Module):
 
 class CoxLinearModel(hk.Module):
 
-    def __init__(self, n_feats, horizon, name: str | None = None):
+    def __init__(self, n_feats, horizon, axis=1, name: str | None = None):
         super().__init__(name)
         self.horizon = horizon
+        self.axis = axis
         self.beta = hk.get_parameter("beta", (n_feats,), init=jnp.zeros)
         self.alpha = hk.get_parameter("alpha", (horizon, ), init=jnp.zeros)
         # self.params = hk.get_parameter("params", (n_feats + horizon,), init=jnp.zeros)
@@ -138,6 +139,6 @@ class CoxLinearModel(hk.Module):
         #     + self.params[-self.horizon :]
         # )
         return (
-            jnp.expand_dims(jnp.dot(xs, self.beta), axis=1)
+            jnp.expand_dims(jnp.dot(xs, self.beta), axis=self.axis)
             + self.alpha
         )

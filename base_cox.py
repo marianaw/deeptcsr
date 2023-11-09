@@ -11,7 +11,7 @@ import optax
 import pandas as pd
 
 from networks import CoxLinearModel, get_update_and_apply, HorizonBias
-from utils import DataGenerator, batch_generator, get_data, kaplan_meier, train_test_split
+from utils import TgtMskDataGenerator, batch_generator, get_data, kaplan_meier, train_test_split
 
 
 Params = chex.ArrayTree
@@ -31,6 +31,7 @@ class ConfigParams:
     weight_decay: float
     num_epochs: int
     dataset_kwargs: dict
+    axis: int
     landmark: bool = False
     output_file: str = None
     # horizon: int
@@ -74,22 +75,23 @@ class BaseSA:
         self._key = jax.random.PRNGKey(seed)
 
         # dataset info
-        seqs, ts, cs, target, mask = get_data(self.config.dataset_name,
-                                              self.config.landmark,
-                                              self.config.dataset_kwargs)
+        seqs, ts, cs, target, h_ws, mask = get_data(self.config.dataset_name,
+                                                    self.config.landmark,
+                                                    self.config.dataset_kwargs)
 
         n = seqs.shape[0]
         # seqs = jnp.concatenate((seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
         self.data = {'seqs': seqs,
                      'ts': ts,
                      'cs': cs,
+                     'h_ws': h_ws,
                      'target': target,
                      'mask': mask}
         dim = seqs.shape[-1]
 
         # Encoder
         def forward_fn(x):
-            cox = CoxLinearModel(dim, H)
+            cox = CoxLinearModel(dim, H, axis=self.config.axis)
             return cox(x)
 
         _some_input = self.data['seqs'][:20]
@@ -152,6 +154,7 @@ class BaseSA:
             return model_state, loss
 
         self.update = jax.jit(update)
+        self.online_enc_update = online_enc_update
 
     def _next_rng_key(self) -> chex.PRNGKey:
         """Get the next rng subkey from class rngkey.
@@ -209,35 +212,39 @@ class BaseSA:
 
         where `K` is the horizon.
         """
-        logits = self.forward(self.state.params, xs).squeeze(
-        )  # We call this for the first state.
+        logits = self.forward(self.state.params, xs)
+        if self.config.axis == 1:
+            logits = logits.squeeze()  # We call this for the first state.
         log_hs = jax.nn.log_sigmoid(logits)
-        surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=1))
-        return jnp.insert(surv, 0, 1.0, axis=1)
-    
-    def brier_score(self, seqs, ts, cs, h):
+        surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=self.config.axis))
+        return jnp.insert(surv, 0, 1.0, axis=self.config.axis)
+
+    def brier_score(self, h, surv, ts, cs, ms):
         cs = cs.astype(jnp.bool_)
-        surv = self.survival_curve(seqs)
         ws = kaplan_meier(ts - ~cs, ~cs)
-        
+
         # Sequences that terminated.
         mask = jnp.where((ts <= h) & ~cs, 1, 0)
-        tot = jnp.sum((1/ws[ts-1]) * (0.0 - surv[:, h-1])**2 * mask)
-        
-        # Sequences that are still active.
-        mask = jnp.where((ts > h) | ((ts == h) & cs), 1, 0)
-        aux = jnp.sum((1 / ws[h - 1]) * (1.0 - surv[:, h - 1]) ** 2 * mask)
+        aux = (1/ws[ts-1]) * (0.0 - surv[:, h-1])**2 * mask * ms
         aux = jnp.where(jnp.isinf(aux), 0, aux)
         aux = jnp.where(jnp.isnan(aux), 0, aux)
+        tot = jnp.sum(aux)
+
+        # Sequences that are still active.
+        mask = jnp.where((ts > h) | ((ts == h) & cs), 1, 0)
+        aux = (1 / ws[h - 1]) * (1.0 - surv[:, h - 1]) ** 2 * mask * ms
+        aux = jnp.where(jnp.isinf(aux), 0, aux)
+        aux = jnp.where(jnp.isnan(aux), 0, aux)
+        aux = jnp.sum(aux)
         tot += aux
         return tot
 
-    def integrated_brier_score(self, xs, ts, cs):
-        brier = partial(self.brier_score, xs, ts, cs)
+    def integrated_brier_score(self, surv, ts, cs, ms):
+        brier = partial(self.brier_score, surv=surv, ts=ts, cs=cs, ms=ms)
         f = jax.vmap(brier)
         t_max = jnp.max(ts)
         hs = jnp.arange(1, t_max+1)
-        return jnp.sum(f(hs)/ (t_max * len(ts)))
+        return jnp.sum(f(hs) / (t_max * len(ts)))
 
     def old_integrated_brier_score(self, xs, ts, cs):
         """Compute the integrated Brier score."""

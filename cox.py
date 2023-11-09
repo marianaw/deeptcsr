@@ -10,7 +10,7 @@ import optax
 import pandas as pd
 
 from networks import get_update_and_apply, HorizonBias
-from utils import DataGenerator, batch_generator, get_data, kaplan_meier, train_test_split
+from utils import TgtMskDataGenerator, batch_generator, get_data, kaplan_meier, train_test_split
 
 
 Params = chex.ArrayTree
@@ -163,10 +163,10 @@ class SA:
                                self.data['mask'],
                                rng=subkey)
         subkey = self._next_rng_key()
-        train_gen = DataGenerator(X_train, y_train, m_train,
+        train_gen = TgtMskDataGenerator(X_train, y_train, m_train,
                                   self.config.batch_size, subkey)
         subkey = self._next_rng_key()
-        test_gen = DataGenerator(X_test, y_test, m_test,
+        test_gen = TgtMskDataGenerator(X_test, y_test, m_test,
                                  self.config.batch_size, subkey)
         return train_gen, test_gen
 

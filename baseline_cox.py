@@ -80,6 +80,7 @@ class SA(BaseSA):
 
         if train_gen is None or test_gen is None:
             train_gen, test_gen = self.get_train_test()
+
         for epoch in range(self.config.num_epochs):
             tr_loss = self.train_step(train_gen)
             te_loss = self.test_step(test_gen)

@@ -27,6 +27,7 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
     h, _ = seq.shape
     target = jnp.zeros((h, h))
     h_ws = jnp.ones((h, h))
+    mask = jnp.ones_like(target)
     if not c:  # Subject reached terminal state within the horizon.
         target = jnp.eye(t)[::-1]
         target = pad_to(target, shape=(h, h))
@@ -35,15 +36,13 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
             tt = t.item()
             if tt <= h:
                 h_ws = jnp.tril(jnp.ones_like(target), -(h-t.item()))[::-1]
+                mask_out = h - t
+                mask = mask.at[t:, :].set(jnp.zeros((mask_out, h)))
         else:
-            t = min(t, seq.shape[0])
-            h_ws = jnp.ones((1, t))
+            t_aux = min(t, seq.shape[0])
+            h_ws = jnp.ones((1, t_aux))
             h_ws = pad_to(h_ws, shape=(h, h))
-
-    mask = jnp.ones_like(target)
-    if t < h:
-        mask_out = h - t
-        mask = mask.at[t:, :].set(jnp.zeros((mask_out, h)))
+            mask = mask.at[1:, :].set(jnp.zeros((h-1,h)))
 
     return target, h_ws, mask
 

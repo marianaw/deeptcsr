@@ -30,7 +30,7 @@ class Config(ConfigParams):
 @chex.dataclass(frozen=True)
 class ModelState:
     """A structure of the current model state"""
-    onl_params: Params
+    params: Params
     tgt_params: Params
     opt_state: optax.OptState
 
@@ -104,12 +104,12 @@ class DeepLambdaSA(BaseSA):
         params, opt_state = self.state.values()
 
         # Online and Target initializations
-        onl_params = params
+        params = params
         tgt_params = jax.tree_map(jnp.copy, params)
 
         # Update model state
         self.state = ModelState(
-            onl_params=onl_params,
+            params=params,
             tgt_params=tgt_params,
             opt_state=opt_state,
         )
@@ -118,8 +118,8 @@ class DeepLambdaSA(BaseSA):
         get_tgt = get_mapped_f_factory(
                 _get_targets, self.lambda_, self.horizon, in_axis=(0, 0))
         
-        def get_targets(X, ys):
-            s_tgt = self.forward(self.state.tgt_params, X)
+        def get_targets(tgt_logits, ys):
+            s_tgt = jax.nn.sigmoid(tgt_logits)
             h = get_tgt(s_tgt, ys)
             return h
 
@@ -129,20 +129,15 @@ class DeepLambdaSA(BaseSA):
         get_ws = get_mapped_f_factory(
                 _get_weights, self.lambda_, self.horizon, in_axis=(0, 0, 0, 0))
         
-        def get_weights(X, ys, cs, h_ws):
-            logits = self.forward(self.state.tgt_params, X)
-            log_hs = jax.nn.log_sigmoid(logits)
-            surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=1))
-            s_ws = jnp.insert(surv, 0, 1.0, axis=-1)
-            s_ws = s_ws[:, :, :-1]
+        def get_weights(s_ws, ys, cs, h_ws):
             w = get_ws(s_ws, h_ws, ys, cs)
             return w
         
         self.get_weights = jax.jit(get_weights)
 
         # Losses
-        def loss_fn(params, inputs, targets, ws, mask):
-            logits = self.forward(params, inputs)
+        def loss_fn(onl_params, inputs, targets, ws, mask):
+            logits = self.forward(onl_params, inputs)
             assert logits.shape == targets.shape
             loss = bce_logits(targets, logits)
             loss = jnp.mean(loss * ws * mask)
@@ -176,7 +171,7 @@ class DeepLambdaSA(BaseSA):
 
             # Update model state
             model_state = model_state.replace(
-                onl_params=onl_params,
+                params=onl_params,
                 tgt_params=tgt_params,
                 opt_state=opt_state
             )
@@ -218,8 +213,14 @@ class DeepLambdaSA(BaseSA):
             for seqs, ts, cs, ys, m, h_ws in train_gen:
 
                 # Get targets
-                h = self.get_targets(seqs, ys)
-                ws = self.get_weights(seqs, ys, cs, h_ws)
+                tgt_logits = self.forward(self.state.tgt_params, seqs)
+                log_hs = jax.nn.log_sigmoid(tgt_logits)
+                tgt_surv = jnp.exp(jnp.cumsum(log_hs - tgt_logits, axis=1))
+                s_ws = jnp.insert(tgt_surv, 0, 1.0, axis=-1)
+                s_ws = s_ws[:, :, :-1]
+
+                h = self.get_targets(tgt_logits, ys)
+                ws = self.get_weights(s_ws, ys, cs, h_ws)
 
                 self.state, loss = self.update(
                     self.state,

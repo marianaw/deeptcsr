@@ -16,7 +16,7 @@ arch:
     dilation_factor: 2
     name: tcn_scores
 
-
+output_file: /Users/mariana/Documents/projects/Huawei/Results
 dataset_kwargs:
   horizon: 100
   task_id: 11

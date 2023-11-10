@@ -1,6 +1,8 @@
 from functools import partial
 from dataclasses import dataclass
 import inspect
+import os
+import pickle
 import chex
 import jax
 import jax.numpy as jnp
@@ -70,6 +72,7 @@ class BaseSA:
         self.horizon = H
 
         # Random key
+        self.seed = seed
         self._key = jax.random.PRNGKey(seed)
 
         # dataset info
@@ -95,7 +98,7 @@ class BaseSA:
                 # (batch, H, channels)
                 out = jnp.transpose(out, axes=(0, 2, 1))
                 return out
-            
+
         else:
             dim = seqs.shape[-1]
 
@@ -103,8 +106,9 @@ class BaseSA:
                 # In the simples case we don't process the input data at all.
                 return x
 
-        self.backbone = hk.without_apply_rng(hk.transform(apply_backbone)).apply
-        
+        self.backbone = hk.without_apply_rng(
+            hk.transform(apply_backbone)).apply
+
         # Encoder
         def forward_fn(x):
             cox = CoxLinearModel(dim, H, axis=self.config.axis)
@@ -180,7 +184,7 @@ class BaseSA:
         """
         self._key, subkey = jax.random.split(self._key)
         return subkey
-    
+
     # Scores
     def scores(self, x):
         backbone_params = {
@@ -288,3 +292,21 @@ class BaseSA:
             idx = (ts > h) | ((ts == h) & cs)
             tot += jnp.sum((1 / ws[h - 1]) * (1.0 - surv[idx, h - 1]) ** 2)
         return tot / (t_max * len(ts))
+
+    def save(self):
+        if self.config.output_file is not None:
+            ext = f'seed_{self.seed}'
+            if self.config.dataset_name == 'single_task':
+                task_id = self.config.dataset_kwargs['task_id']
+                ext = ext + f'_taskid_{task_id}'
+
+            output_path = os.path.join(self.config.output_file, 
+                                       self.config.dataset_name, 
+                                       ext)
+            
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            path_model = os.path.join(output_path, 'model.pt')
+            path_state = os.path.join(output_path, 'state.pt')
+            pickle.dump(self.state.params, open(path_model, 'wb'))
+            pickle.dump(self.state.opt_state, open(path_state, 'wb'))

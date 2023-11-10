@@ -73,12 +73,12 @@ class SA(BaseSA):
                                  batch_size=self.config.batch_size, rng=subkey)
         return train_gen, test_gen
 
-    def train(self, train_gen=None, test_gen=None):
+    def train(self, train_gen=None):
         """Training loop"""
         train_loss = []
         test_loss = []
 
-        if train_gen is None or test_gen is None:
+        if train_gen is None:
             train_gen, test_gen = self.get_train_test()
 
         for epoch in range(self.config.num_epochs):
@@ -96,18 +96,18 @@ class SA(BaseSA):
             #         f"Test classification loss {te_loss:.3f} at epoch {epoch}")
             #     print()
 
-        if self.output_file is not None:
-            if not os.path.exists(self.output_file):
-                os.makedirs(self.output_file)
-            path_model = os.path.join(self.output_file, 'model.pt')
-            path_state = os.path.join(self.output_file, 'state.pt')
-            path_csv = os.path.join(self.output_file, 'result.csv')
-            pickle.dump(self.state.params, open(path_model, 'wb'))
-            pickle.dump(self.state.opt_state, open(path_state, 'wb'))
-            df = pd.DataFrame({
-                "train_classif_loss": train_loss,
-                "test_classif_loss": test_loss,
-            })
-            df.to_csv(path_csv)
+        # if self.output_file is not None:
+        #     if not os.path.exists(self.output_file):
+        #         os.makedirs(self.output_file)
+        #     path_model = os.path.join(self.output_file, 'model.pt')
+        #     path_state = os.path.join(self.output_file, 'state.pt')
+        #     path_csv = os.path.join(self.output_file, 'result.csv')
+        #     pickle.dump(self.state.params, open(path_model, 'wb'))
+        #     pickle.dump(self.state.opt_state, open(path_state, 'wb'))
+        #     df = pd.DataFrame({
+        #         "train_classif_loss": train_loss,
+        #         "test_classif_loss": test_loss,
+        #     })
+        #     df.to_csv(path_csv)
         
         return train_loss, test_loss

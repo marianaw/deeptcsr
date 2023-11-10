@@ -44,10 +44,10 @@ if __name__ == '__main__':
 
     try:
         agent.train()
-        # copyfile(config_path, os.path.join(output_file, 'config.yaml'))
         config_path = os.path.join(output_file, 'config.yaml')
         with open(config_path, 'w') as outfile:
             yaml.dump(config, outfile, default_flow_style=False)
+        
     except KeyboardInterrupt:
         gc.collect()
         pass

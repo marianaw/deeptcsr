@@ -2,7 +2,7 @@ import haiku as hk
 import jax
 import jax.numpy as jnp
 import optax
-from typing import Any, Mapping, Optional, Text, Type
+from typing import Any, Mapping, Text
 
 
 def get_update_and_apply(optimizer):
@@ -104,23 +104,6 @@ class MLP(hk.Module):
     out = jax.nn.relu(out)
     out = self.linear2(out)
     return out
-  
-
-class HorizonBias(hk.Module):
-
-    def __init__(self, horizon, name: str | None = None):
-        super().__init__(name)
-        self.params = hk.get_parameter("alpha_t", (horizon,), init=jnp.zeros)
-
-    def __call__(self, inputs):
-        #If inputs is of shape (batch_size, dim)
-        # if len(inputs.shape) == 1:
-        #     # We add a dimension to account for the time step:
-        #     # (batch_size, time_step, dim)
-        #     # Observe that when calling this function dim = 1.
-        #     inputs = jnp.expand_dims(inputs, axis=1)
-
-        return inputs + self.params
 
 
 class CoxLinearModel(hk.Module):
@@ -131,13 +114,8 @@ class CoxLinearModel(hk.Module):
         self.axis = axis
         self.beta = hk.get_parameter("beta", (n_feats,), init=jnp.zeros)
         self.alpha = hk.get_parameter("alpha", (horizon, ), init=jnp.zeros)
-        # self.params = hk.get_parameter("params", (n_feats + horizon,), init=jnp.zeros)
 
     def __call__(self, xs):   
-        # return (
-        #     jnp.expand_dims(jnp.dot(xs, self.params[: -self.horizon]), axis=1)
-        #     + self.params[-self.horizon :]
-        # )
         return (
             jnp.expand_dims(jnp.dot(xs, self.beta), axis=self.axis)
             + self.alpha

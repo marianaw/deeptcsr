@@ -1,12 +1,10 @@
 from functools import partial
-import os
 import chex
 import jax
 import jax.numpy as jnp
 import optax
-import pandas as pd
 from base_cox import BaseSA, ConfigParams, Params
-from utils import TimesDataGenerator, train_test_split, unroll
+from utils import TimesDataGenerator, train_test_split
 from dataclasses import dataclass
 
 
@@ -104,7 +102,6 @@ class DeepLambdaSA(BaseSA):
         params, opt_state = self.state.values()
 
         # Online and Target initializations
-        params = params
         tgt_params = jax.tree_map(jnp.copy, params)
 
         # Update model state

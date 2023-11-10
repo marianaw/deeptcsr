@@ -64,7 +64,7 @@ def pad_sequences(seqs, max_length):
 def get_data(dataset_name, landmark, kwargs):
     loaders = {'aids': get_data_baseline,
                'single_task': get_single_task_dataset,
-               }
+               'mixed_tasks': get_mixed_task_dataset}
 
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)
@@ -98,6 +98,44 @@ def get_single_task_dataset(task_id, data_path, horizon=None, split=True, pad=Fa
     for root, dirs, files in os.walk(data_path):
         for filename in files:
             if filename.endswith('.mat') and 'task_{}'.format(task_id) in filename:
+                file_path = os.path.join(root, filename)
+                with h5py.File(file_path, 'r') as f:
+                    if 'traces_self' in f:
+                        size = f['traces_self'].shape[0]
+                        # Extract the array under the 'traces_self' key
+                        t_self = [f['traces_self']
+                                  [i].reshape(-1, 39) for i in range(size)]
+                        seqs.extend(t_self)
+
+    if split:
+        arrs, tss, css = [], [], []
+        for seq in seqs:
+            arr, ts, cs = split_and_pad_last(seq, horizon)
+            arrs.append(arr)
+            css.append(cs)
+            tss.append(ts)
+        seqs = jnp.vstack(arrs)
+        ts = jnp.hstack(tss)
+        cs = jnp.hstack(css)
+
+    else:
+        ts = jnp.array([len(arr) for arr in seqs])
+        horizon = jnp.max(ts) if horizon is None else horizon
+        cs = jnp.where(ts > horizon, 1, 0)
+        pad = True
+
+    if pad:
+        seqs = pad_sequences(seqs, horizon)
+
+    ts = ts - cs.astype(jnp.int32)
+    return seqs, ts, cs
+
+
+def get_mixed_task_dataset(data_path, horizon=None, split=True, pad=False):
+    seqs = []
+    for root, dirs, files in os.walk(data_path):
+        for filename in files:
+            if filename.endswith('.mat'):
                 file_path = os.path.join(root, filename)
                 with h5py.File(file_path, 'r') as f:
                     if 'traces_self' in f:

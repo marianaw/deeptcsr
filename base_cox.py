@@ -1,17 +1,14 @@
 from functools import partial
 from dataclasses import dataclass
 import inspect
-import os
-import pickle
 import chex
 import jax
 import jax.numpy as jnp
 import haiku as hk
 import optax
-import pandas as pd
 
-from networks import CoxLinearModel, get_update_and_apply, HorizonBias
-from utils import TgtMskDataGenerator, batch_generator, get_data, kaplan_meier, train_test_split
+from networks import TCN, CoxLinearModel, get_update_and_apply
+from utils import get_data, kaplan_meier
 
 
 Params = chex.ArrayTree
@@ -32,6 +29,7 @@ class ConfigParams:
     num_epochs: int
     dataset_kwargs: dict
     axis: int
+    arch: dict
     landmark: bool = False
     output_file: str = None
     # horizon: int
@@ -78,24 +76,42 @@ class BaseSA:
         seqs, ts, cs, target, h_ws, mask = get_data(self.config.dataset_name,
                                                     self.config.landmark,
                                                     self.config.dataset_kwargs)
-
-        n = seqs.shape[0]
-        # seqs = jnp.concatenate((seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
         self.data = {'seqs': seqs,
                      'ts': ts,
                      'cs': cs,
                      'h_ws': h_ws,
                      'target': target,
                      'mask': mask}
-        dim = seqs.shape[-1]
 
+        if self.config.arch['deep']:
+            arch_kwargs = self.config.arch['arch_kwargs']
+            dim = arch_kwargs['num_channels'][-1]
+
+            def apply_backbone(x):
+                tcn = TCN(**arch_kwargs)
+                # (batch, channels, H)
+                perm_x = jnp.transpose(x, axes=(0, 2, 1))
+                out = tcn(perm_x)
+                # (batch, H, channels)
+                out = jnp.transpose(out, axes=(0, 2, 1))
+                return out
+            
+        else:
+            dim = seqs.shape[-1]
+
+            def apply_backbone(x):
+                # In the simples case we don't process the input data at all.
+                return x
+
+        self.backbone = hk.without_apply_rng(hk.transform(apply_backbone)).apply
+        
         # Encoder
         def forward_fn(x):
             cox = CoxLinearModel(dim, H, axis=self.config.axis)
-            return cox(x)
+            out = apply_backbone(x)
+            return cox(out)
 
         _some_input = self.data['seqs'][:20]
-        # _some_input = _some_input.reshape(1, *_some_input.shape)
         _key = self._next_rng_key()
         forward = hk.without_apply_rng(hk.transform(forward_fn))
         params = forward.init(_key, _some_input)
@@ -164,6 +180,15 @@ class BaseSA:
         """
         self._key, subkey = jax.random.split(self._key)
         return subkey
+    
+    # Scores
+    def scores(self, x):
+        backbone_params = {
+            key: value for key, value in self.state.params.items() if 'tcn_scores' in key}
+        beta = self.state.params['cox_linear_model']['beta']
+
+        out = self.backbone(backbone_params, x)
+        return -jnp.dot(out, beta)
 
     def train_step(self, train_gen):
         epoch_loss = 0.0
@@ -225,20 +250,21 @@ class BaseSA:
 
         # Sequences that terminated.
         mask = jnp.where((ts <= h) & ~cs, 1, 0)
-        aux = (1/ws[ts-1]) * (0.0 - surv[:, h-1])**2 * mask 
+        aux = (1/ws[ts-1]) * (0.0 - surv[:, h-1])**2 * mask
         aux = jnp.where(jnp.isinf(aux), 0, aux)
         aux = jnp.where(jnp.isnan(aux), 0, aux)
         tot = jnp.sum(aux)
 
         # Sequences that are still active.
         mask = jnp.where((ts > h) | ((ts == h) & cs), 1, 0)
-        aux = (1 / ws[h - 1]) * (1.0 - surv[:, h - 1]) ** 2 * mask 
+        aux = (1 / ws[h - 1]) * (1.0 - surv[:, h - 1]) ** 2 * mask
         aux = jnp.where(jnp.isinf(aux), 0, aux)
         aux = jnp.where(jnp.isnan(aux), 0, aux)
         aux = jnp.sum(aux)
         tot += aux
         return tot
 
+    # @jax.jit
     def integrated_brier_score(self, surv, ts, cs):
         brier = partial(self.brier_score, surv=surv, ts=ts, cs=cs)
         f = jax.vmap(brier)

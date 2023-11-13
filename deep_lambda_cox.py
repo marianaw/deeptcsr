@@ -186,6 +186,7 @@ class DeepLambdaSA(BaseSA):
                                                                                      self.data['mask'],
                                                                                      self.data['ts'],
                                                                                      self.data['cs'],
+                                                                                     seed=self.seed,
                                                                                      test_size=test_size)
         subkey = self._next_rng_key()
         train_gen = TimesDataGenerator(X=X_train, h_ws=hws_train,

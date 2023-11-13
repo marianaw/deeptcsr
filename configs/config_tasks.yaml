@@ -8,19 +8,21 @@ axis: 2
 landmark: True
 target_lr: .0001
 arch:
-  deep: True
-  arch_kwargs:
-    num_inputs: 39
-    num_channels: [64, 32, 16]
-    kernel_size: 3
-    dilation_factor: 2
-    name: tcn_scores
+  deep: False
+  # arch_kwargs:
+  #   num_inputs: 39
+  #   num_channels: [64, 32, 16]
+  #   kernel_size: 3
+  #   dilation_factor: 2
+  #   name: tcn_scores
 
+preprocessed_data: False
 output_file: /Users/mariana/Documents/projects/Huawei/Results
 dataset_kwargs:
   horizon: 100
   task_id: 11
-  data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
+  # data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
+  data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1
 
 lambda_: 0.1
 num_steps: 5

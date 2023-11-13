@@ -10,7 +10,7 @@ import haiku as hk
 import optax
 
 from networks import TCN, CoxLinearModel, get_update_and_apply
-from utils import get_data, kaplan_meier, load_preprocessed_dataset
+from utils import convert_to_jax_arrays, get_data, kaplan_meier, load_preprocessed_dataset
 
 
 Params = chex.ArrayTree
@@ -32,6 +32,7 @@ class ConfigParams:
     dataset_kwargs: dict
     axis: int
     arch: dict
+    preprocessed_data: bool
     landmark: bool = False
     output_file: str = None
     # horizon: int
@@ -119,7 +120,7 @@ class BaseSA:
             cox = CoxLinearModel(dim, H, axis=self.config.axis)
             out = apply_backbone(x)
             return cox(out)
-
+        
         _some_input = self.data['seqs'][:20]
         _key = self._next_rng_key()
         forward = hk.without_apply_rng(hk.transform(forward_fn))
@@ -204,6 +205,9 @@ class BaseSA:
         count = 0
 
         for X, y, m in train_gen:
+
+            X, y, m = convert_to_jax_arrays(X, y, m)
+            
             self.state, loss = self.update(
                 self.state,
                 X,
@@ -222,6 +226,7 @@ class BaseSA:
         epoch_loss = 0.0
         count = 0
         for X, y, m in test_gen:
+            X, y, m = convert_to_jax_arrays(X, y, m)
 
             # Get validation and test stats
             out = self.forward(

@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from base_cox import BaseSA, ConfigParams, Params
-from utils import TimesDataGenerator, train_test_split
+from utils import TimesDataGenerator, convert_to_jax_arrays, train_test_split
 from dataclasses import dataclass
 
 
@@ -186,7 +186,6 @@ class DeepLambdaSA(BaseSA):
                                                                                      self.data['mask'],
                                                                                      self.data['ts'],
                                                                                      self.data['cs'],
-                                                                                     rng=subkey,
                                                                                      test_size=test_size)
         subkey = self._next_rng_key()
         train_gen = TimesDataGenerator(X=X_train, h_ws=hws_train,
@@ -207,7 +206,9 @@ class DeepLambdaSA(BaseSA):
 
         losses = []
         for epoch in range(self.config.num_epochs):
-            for seqs, ts, cs, ys, m, h_ws in train_gen:
+            for seqs, _, cs, ys, m, h_ws in train_gen:
+
+                seqs, cs, ys, m, h_ws = convert_to_jax_arrays(seqs, cs, ys, m, h_ws)
 
                 # Get targets
                 tgt_logits = self.forward(self.state.tgt_params, seqs)

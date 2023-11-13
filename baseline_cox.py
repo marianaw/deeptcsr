@@ -1,11 +1,9 @@
 from dataclasses import dataclass
 import inspect
-import os
-import pickle
 import chex
 import optax
-import pandas as pd
 
+from tqdm import tqdm
 from utils import TgtMskDataGenerator, train_test_split
 from base_cox import BaseSA
 
@@ -59,7 +57,6 @@ class SA(BaseSA):
                                self.data['mask'],
                                self.data['ts'],
                                self.data['cs'],
-                               rng=subkey,
                                test_size=test_size)
         subkey = self._next_rng_key()
         train_gen = TgtMskDataGenerator(X=X_train,
@@ -81,7 +78,7 @@ class SA(BaseSA):
         if train_gen is None:
             train_gen, test_gen = self.get_train_test()
 
-        for epoch in range(self.config.num_epochs):
+        for epoch in tqdm(range(self.config.num_epochs)):
             tr_loss = self.train_step(train_gen)
             te_loss = self.test_step(test_gen)
             train_loss.append(tr_loss)

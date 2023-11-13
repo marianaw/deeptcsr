@@ -1,7 +1,7 @@
 import jax
 import jax.numpy as jnp
 from base_cox import BaseSA, ConfigParams
-from utils import train_test_split, unroll
+from utils import convert_to_jax_arrays, train_test_split, unroll
 from dataclasses import dataclass
 
 
@@ -38,8 +38,10 @@ class LambdaSA(BaseSA):
                                self.data['mask'],
                                self.data['ts'],
                                self.data['cs'],
-                               rng=subkey,
                                test_size=test_size)
+        
+        X_train, X_test, ts_train, ts_test, cs_train, cs_test = convert_to_jax_arrays(X_train, X_test, ts_train, ts_test, cs_train, cs_test)
+        
         if self.config.landmark:
             X_train, ts_train, cs_train = unroll(X_train, ts_train, cs_train)
             X_test, ts_test, cs_test = unroll(X_test, ts_test, cs_test)

@@ -3,6 +3,7 @@ from math import ceil
 import os
 import h5py
 from pickle import load
+import numpy as np
 import jax
 import jax.numpy as jnp
 from lifelines.utils import concordance_index as _concordance_index
@@ -77,30 +78,30 @@ def get_data(dataset_name, landmark, kwargs):
 
 def load_preprocessed_dataset(data_path):
     data = h5py.File(data_path, 'r')
-    seqs = jnp.array(data['seqs'])
-    ts = jnp.array(data['ts'])
-    cs = jnp.array(data['cs'])
-    h_ws = jnp.array(data['h_ws'])
-    mask = jnp.array(data['mask'])
-    h_tgt = jnp.array(data['h_tgt'])
+    seqs = np.array(data['seqs'])
+    ts = np.array(data['ts'])
+    cs = np.array(data['cs'])
+    h_ws = np.array(data['h_ws'])
+    mask = np.array(data['mask'])
+    h_tgt = np.array(data['h_tgt'])
     return seqs, ts, cs, h_tgt, h_ws, mask
 
 
 def split_and_pad_last(arr, H=1000):
     t, dim = arr.shape
     n_splits = ceil(t/H)
-    indices = jnp.arange(1, n_splits) * H
-    arrs = jnp.array_split(arr, indices_or_sections=indices)
+    indices = np.arange(1, n_splits) * H
+    arrs = np.array_split(arr, indices_or_sections=indices)
     last = arrs[-1]
     h, _ = last.shape
     if h < H:
-        zs = jnp.zeros((H-h, dim))
-        last = jnp.concatenate((last, zs))
-    arr = jnp.stack(arrs[:-1] + [last])
+        zs = np.zeros((H-h, dim))
+        last = np.concatenate((last, zs))
+    arr = np.stack(arrs[:-1] + [last])
 
     ts = t - indices
-    ts = jnp.hstack((jnp.array([t]), ts))
-    cs = jnp.hstack((jnp.ones_like(indices), jnp.array([0]))).astype(jnp.bool_)
+    ts = np.hstack((np.array([t]), ts))
+    cs = np.hstack((np.ones_like(indices), np.array([0]))).astype(bool)
     return arr, ts, cs
 
 
@@ -125,20 +126,20 @@ def get_single_task_dataset(task_id, data_path, horizon=None, split=True, pad=Fa
             arrs.append(arr)
             css.append(cs)
             tss.append(ts)
-        seqs = jnp.vstack(arrs)
-        ts = jnp.hstack(tss)
-        cs = jnp.hstack(css)
+        seqs = np.vstack(arrs)
+        ts = np.hstack(tss)
+        cs = np.hstack(css)
 
     else:
-        ts = jnp.array([len(arr) for arr in seqs])
-        horizon = jnp.max(ts) if horizon is None else horizon
-        cs = jnp.where(ts > horizon, 1, 0)
+        ts = np.array([len(arr) for arr in seqs])
+        horizon = np.max(ts) if horizon is None else horizon
+        cs = np.where(ts > horizon, 1, 0)
         pad = True
 
     if pad:
         seqs = pad_sequences(seqs, horizon)
 
-    ts = ts - cs.astype(jnp.int32)
+    ts = ts - cs.astype(int)
     return seqs, ts, cs
 
 
@@ -163,20 +164,20 @@ def get_mixed_task_dataset(data_path, horizon=None, split=True, pad=False):
             arrs.append(arr)
             css.append(cs)
             tss.append(ts)
-        seqs = jnp.vstack(arrs)
-        ts = jnp.hstack(tss)
-        cs = jnp.hstack(css)
+        seqs = np.vstack(arrs)
+        ts = np.hstack(tss)
+        cs = np.hstack(css)
 
     else:
-        ts = jnp.array([len(arr) for arr in seqs])
-        horizon = jnp.max(ts) if horizon is None else horizon
-        cs = jnp.where(ts > horizon, 1, 0)
+        ts = np.array([len(arr) for arr in seqs])
+        horizon = np.max(ts) if horizon is None else horizon
+        cs = np.where(ts > horizon, 1, 0)
         pad = True
 
     if pad:
         seqs = pad_sequences(seqs, horizon)
 
-    ts = ts - cs.astype(jnp.int32)
+    ts = ts - cs.astype(int)
     return seqs, ts, cs
 
 
@@ -191,25 +192,25 @@ def get_targets_and_masks(seqs, ts, cs, landmark):
         h_ws.append(h_w)
         masks.append(mask)
 
-    target = jnp.stack(targets)
-    mask = jnp.stack(masks)
-    h_ws = jnp.stack(h_ws)
+    target = np.stack(targets)
+    mask = np.stack(masks)
+    h_ws = np.stack(h_ws)
     return target, h_ws, mask
 
 
 def get_data_baseline(data_path, horizon=None):
     data = load(open(data_path, 'rb'))
-    seqs = jnp.array(data['seqs'])
-    cs = jnp.array(data['cs'])
-    ts = jnp.array(data['ts'])
+    seqs = np.array(data['seqs'])
+    cs = np.array(data['cs'])
+    ts = np.array(data['ts'])
 
     return seqs, ts, cs
 
 
-def train_test_split(X, target, h_ws, mask, ts, cs, rng, test_size=0.2):
+def train_test_split(X, target, h_ws, mask, ts, cs, test_size=0.2):
     # Shuffle the indices of the data
     num_samples = X.shape[0]
-    shuffled_indices = jax.random.permutation(rng, jnp.arange(num_samples))
+    shuffled_indices = np.random.shuffle(np.arange(num_samples))
 
     # Calculate the number of samples in the test set
     num_test_samples = int(num_samples * test_size)
@@ -426,3 +427,8 @@ def unroll_time(xs, ts, cs, ms, T):
     ms_ = ms.any(-1, keepdims=True)
     ms_ = ms_.reshape(-1)
     return xs_, ts_, cs_, ms_
+
+
+def convert_to_jax_arrays(*numpy_arrays):
+    jax_arrays = (jnp.asarray(arr) for arr in numpy_arrays)
+    return jax_arrays

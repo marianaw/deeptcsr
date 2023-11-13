@@ -10,7 +10,7 @@ import haiku as hk
 import optax
 
 from networks import TCN, CoxLinearModel, get_update_and_apply
-from utils import get_data, kaplan_meier
+from utils import get_data, kaplan_meier, load_preprocessed_dataset
 
 
 Params = chex.ArrayTree
@@ -76,14 +76,19 @@ class BaseSA:
         self._key = jax.random.PRNGKey(seed)
 
         # dataset info
-        seqs, ts, cs, target, h_ws, mask = get_data(self.config.dataset_name,
-                                                    self.config.landmark,
-                                                    self.config.dataset_kwargs)
+        if self.config.preprocessed_data:
+            data_path = self.config.dataset_kwargs['data_path']
+            seqs, ts, cs, h_tgt, h_ws, mask = load_preprocessed_dataset(
+                data_path)
+        else:
+            seqs, ts, cs, h_tgt, h_ws, mask = get_data(self.config.dataset_name,
+                                                       self.config.landmark,
+                                                       self.config.dataset_kwargs)
         self.data = {'seqs': seqs,
                      'ts': ts,
                      'cs': cs,
                      'h_ws': h_ws,
-                     'target': target,
+                     'target': h_tgt,
                      'mask': mask}
 
         if self.config.arch['deep']:
@@ -300,10 +305,10 @@ class BaseSA:
                 task_id = self.config.dataset_kwargs['task_id']
                 ext = ext + f'_taskid_{task_id}'
 
-            output_path = os.path.join(self.config.output_file, 
-                                       self.config.dataset_name, 
+            output_path = os.path.join(self.config.output_file,
+                                       self.config.dataset_name,
                                        ext)
-            
+
             if not os.path.exists(output_path):
                 os.makedirs(output_path)
             path_model = os.path.join(output_path, 'model.pt')

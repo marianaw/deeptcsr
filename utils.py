@@ -42,7 +42,7 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
             t_aux = min(t, seq.shape[0])
             h_ws = jnp.ones((1, t_aux))
             h_ws = pad_to(h_ws, shape=(h, h))
-            mask = mask.at[1:, :].set(jnp.zeros((h-1,h)))
+            mask = mask.at[1:, :].set(jnp.zeros((h-1, h)))
 
     return target, h_ws, mask
 
@@ -73,6 +73,17 @@ def get_data(dataset_name, landmark, kwargs):
         raise Exception('type of dataset not found.')
 
     return seqs, ts, cs, target, h_ws, mask
+
+
+def load_preprocessed_dataset(data_path):
+    data = h5py.File(data_path, 'r')
+    seqs = jnp.array(data['seqs'])
+    ts = jnp.array(data['ts'])
+    cs = jnp.array(data['cs'])
+    h_ws = jnp.array(data['h_ws'])
+    mask = jnp.array(data['mask'])
+    h_tgt = jnp.array(data['h_tgt'])
+    return seqs, ts, cs, h_tgt, h_ws, mask
 
 
 def split_and_pad_last(arr, H=1000):
@@ -221,7 +232,7 @@ def train_test_split(X, target, h_ws, mask, ts, cs, rng, test_size=0.2):
     cs_train = cs[train_indices]
     cs_test = cs[test_indices]
 
-    return X_train, X_test, y_train, y_test, hws_train, hws_test,\
+    return X_train, X_test, y_train, y_test, hws_train, hws_test, \
         m_train, m_test, ts_train, ts_test, cs_train, cs_test
 
 

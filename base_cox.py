@@ -120,8 +120,8 @@ class BaseSA:
             cox = CoxLinearModel(dim, H, axis=self.config.axis)
             out = apply_backbone(x)
             return cox(out)
-        
-        _some_input = self.data['seqs'][:20]
+
+        _some_input = jnp.array(self.data['seqs'][:2])
         _key = self._next_rng_key()
         forward = hk.without_apply_rng(hk.transform(forward_fn))
         params = forward.init(_key, _some_input)

@@ -279,19 +279,19 @@ class TgtMskDataGenerator(BaseDataGenerator):
         rng = self.rng
         num_samples = X.shape[0]
 
+        permutation = np.arange(num_samples)
         # Shuffle the data using the same random key for X and y if shuffle is True
         if self.shuffle:
-            rng, subkey = jax.random.split(rng)
-            permutation = jax.random.permutation(
-                subkey, jnp.arange(num_samples))
-            X = X[permutation]
-            y = y[permutation]
-            mask = mask[permutation]
+            np.random.shuffle(permutation)
+        
+        if isinstance(X, jnp.ndarray):
+            permutation = jnp.asarray(permutation)
 
         for i in range(0, num_samples, batch_size):
-            batch_X = X[i:i + batch_size]
-            batch_y = y[i:i + batch_size]
-            batch_m = mask[i:i + batch_size]
+            idx = permutation[i:i + batch_size]
+            batch_X = X[idx]
+            batch_y = y[idx]
+            batch_m = mask[idx]
             yield batch_X, batch_y, batch_m
 
 
@@ -307,44 +307,22 @@ class TimesDataGenerator(BaseDataGenerator):
         rng = self.rng
         num_samples = X.shape[0]
 
+        permutation = np.arange(num_samples)
         # Shuffle the data using the same random key for X and y if shuffle is True
         if self.shuffle:
-            rng, subkey = jax.random.split(rng)
-            permutation = jax.random.permutation(
-                subkey, jnp.arange(num_samples))
-            X = X[permutation]
-            cs = cs[permutation]
-            ts = ts[permutation]
-            ys = ys[permutation]
-            mask = mask[permutation]
-            h_ws = h_ws[permutation]
+            np.random.shuffle(permutation)
+        if isinstance(X, jnp.ndarray):
+            permutation = jnp.asarray(permutation)
 
         for i in range(0, num_samples, batch_size):
-            batch_X = X[i:i + batch_size]
-            batch_ts = ts[i:i + batch_size]
-            batch_cs = cs[i:i + batch_size]
-            batch_ys = ys[i:i + batch_size]
-            batch_m = mask[i:i + batch_size]
-            batch_hws = h_ws[i:i + batch_size]
+            idx = permutation[i:i + batch_size]
+            batch_X = X[idx]
+            batch_ts = ts[idx]
+            batch_cs = cs[idx]
+            batch_ys = ys[idx]
+            batch_m = mask[idx]
+            batch_hws = h_ws[idx]
             yield batch_X, batch_ts, batch_cs, batch_ys, batch_m, batch_hws
-
-
-def batch_generator(X, y, mask, batch_size, rng, shuffle=True):
-    num_samples = X.shape[0]
-
-    # Shuffle the data using the same random key for X and y if shuffle is True
-    if shuffle:
-        rng, subkey = jax.random.split(rng)
-        permutation = jax.random.permutation(subkey, jnp.arange(num_samples))
-        X = X[permutation]
-        y = y[permutation]
-        mask = mask[permutation]
-
-    for i in range(0, num_samples, batch_size):
-        batch_X = X[i:i + batch_size]
-        batch_y = y[i:i + batch_size]
-        batch_m = mask[i:i + batch_size]
-        yield batch_X, batch_y, batch_m
 
 
 def kaplan_meier(ts, cs):

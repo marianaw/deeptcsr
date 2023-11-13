@@ -210,7 +210,8 @@ def get_data_baseline(data_path, horizon=None):
 def train_test_split(X, target, h_ws, mask, ts, cs, test_size=0.2):
     # Shuffle the indices of the data
     num_samples = X.shape[0]
-    shuffled_indices = np.random.shuffle(np.arange(num_samples))
+    shuffled_indices = np.arange(num_samples)
+    np.random.shuffle(shuffled_indices)
 
     # Calculate the number of samples in the test set
     num_test_samples = int(num_samples * test_size)

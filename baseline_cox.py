@@ -80,9 +80,11 @@ class SA(BaseSA):
 
         for epoch in range(self.config.num_epochs):
             tr_loss = self.train_step(train_gen)
-            te_loss = self.test_step(test_gen)
             train_loss.append(tr_loss)
-            test_loss.append(te_loss)
+            if test_gen is not None:
+                te_loss = self.test_step(test_gen)
+                test_loss.append(te_loss)
+            
 
             # log
             # if epoch % self.config.log_interval == 0:

@@ -70,7 +70,7 @@ class SA(BaseSA):
                                  batch_size=self.config.batch_size, rng=subkey)
         return train_gen, test_gen
 
-    def train(self, train_gen=None):
+    def train(self, train_gen=None, test_gen=None):
         """Training loop"""
         train_loss = []
         test_loss = []
@@ -78,7 +78,7 @@ class SA(BaseSA):
         if train_gen is None:
             train_gen, test_gen = self.get_train_test()
 
-        for epoch in tqdm(range(self.config.num_epochs)):
+        for epoch in range(self.config.num_epochs):
             tr_loss = self.train_step(train_gen)
             te_loss = self.test_step(test_gen)
             train_loss.append(tr_loss)

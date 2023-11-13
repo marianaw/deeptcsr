@@ -199,10 +199,10 @@ class DeepLambdaSA(BaseSA):
                                       batch_size=self.config.batch_size, rng=subkey)
         return train_gen, test_gen
 
-    def train(self, train_gen=None):
+    def train(self, train_gen=None, test_gen=None):
 
         if train_gen is None:
-            train_gen, _ = self.get_train_test()
+            train_gen, test_gen = self.get_train_test()
 
         losses = []
         for epoch in range(self.config.num_epochs):

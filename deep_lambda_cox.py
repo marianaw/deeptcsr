@@ -210,7 +210,7 @@ class DeepLambdaSA(BaseSA):
             for seqs, _, cs, ys, m, h_ws in train_gen:
 
                 seqs, cs, ys, m, h_ws = convert_to_jax_arrays(seqs, cs, ys, m, h_ws)
-
+                import ipdb; ipdb.set_trace()
                 # Get targets
                 tgt_logits = self.forward(self.state.tgt_params, seqs)
                 log_hs = jax.nn.log_sigmoid(tgt_logits)

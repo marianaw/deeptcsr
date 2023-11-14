@@ -80,9 +80,9 @@ def load_preprocessed_dataset(data_path):
     data = h5py.File(data_path, 'r')
     seqs = np.array(data['seqs'])
     ts = np.array(data['ts'])
-    cs = np.array(data['cs'])
-    h_ws = np.array(data['h_ws'])
-    mask = np.array(data['mask'])
+    cs = np.array(data['cs']).astype(bool)
+    h_ws = np.array(data['h_ws']).astype(bool)
+    mask = np.array(data['mask']).astype(bool)
     h_tgt = np.array(data['h_tgt'])
     return seqs, ts, cs, h_tgt, h_ws, mask
 
@@ -193,8 +193,8 @@ def get_targets_and_masks(seqs, ts, cs, landmark):
         masks.append(mask)
 
     target = np.stack(targets)
-    mask = np.stack(masks)
-    h_ws = np.stack(h_ws)
+    mask = np.stack(masks).astype(bool)
+    h_ws = np.stack(h_ws).astype(bool)
     return target, h_ws, mask
 
 

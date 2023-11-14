@@ -35,6 +35,7 @@ class ModelState:
 
 
 def _get_targets(b_tgt, h_tgt, lambda_, T, b_size):
+    b_size = min(b_size, b_tgt.shape[0])
     stgt_init = jnp.roll(b_tgt[:, T-1], -1)
     stgt_init = stgt_init.at[:, T-1].set(0.0)
     htgt_init = jnp.zeros((b_size, T))
@@ -61,6 +62,7 @@ def _get_targets(b_tgt, h_tgt, lambda_, T, b_size):
 
 
 def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, b_size):
+    b_size = min(b_size, s_wgt.shape[0])
     w_init = s_wgt[:, T-1]
     w_init = jnp.roll(w_init, 1)
     w_init = w_init.at[:, 0].set(1.0)
@@ -136,16 +138,16 @@ class DeepLambdaSA(BaseSA):
             h = _get_targets(s_tgt, ys, self.lambda_, self.horizon, self.config.batch_size)
             return h
 
-        # self.get_targets = jax.jit(get_targets)
-        self.get_targets = get_targets
+        self.get_targets = jax.jit(get_targets)
+        # self.get_targets = get_targets
 
         def get_weights(s_ws, ys, cs, h_ws):
             w = _get_weights(s_ws, h_ws, ys, cs,
                              self.lambda_, self.horizon, self.config.batch_size)
             return w
         
-        # self.get_weights = jax.jit(get_weights)
-        self.get_weights = get_weights
+        self.get_weights = jax.jit(get_weights)
+        # self.get_weights = get_weights
 
         # Losses
         def loss_fn(onl_params, inputs, targets, ws, mask):
@@ -190,8 +192,8 @@ class DeepLambdaSA(BaseSA):
 
             return model_state, loss
 
-        # self.update = jax.jit(update)
-        self.update = update
+        self.update = jax.jit(update)
+        # self.update = update
 
     def get_train_test(self, test_size=.2):
         subkey = self._next_rng_key()

@@ -17,12 +17,13 @@ arch:
     name: tcn_scores
 
 preprocessed_data: False
-output_file: /Users/mariana/Documents/projects/Huawei/Results
+# output_file: /Users/mariana/Documents/projects/Huawei/Results
+output_file: /home/mvargas/code/Huawei/Results/{}/
 dataset_kwargs:
   horizon: 100
   task_id: 11
-  data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
-  # data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1
+  # data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
+  data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1
 
 lambda_: 0.1
 num_steps: 5

@@ -34,7 +34,8 @@ class ModelState:
 
 
 def _get_targets(b_tgt, h_tgt, lambda_, T):
-    stgt_init = jnp.insert(b_tgt[T-1, 1:], T, 0)
+    # stgt_init = jnp.insert(b_tgt[T-1, 1:], T, 0)
+    stgt_init = b_tgt[T-1].at[T-1].set(0.0)
     htgt_init = jnp.zeros(T,)
     carry_init = (stgt_init, htgt_init)
 
@@ -64,7 +65,7 @@ def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T):
         h_tgt, h_wgt, s_wgt = h
 
         h = lambda_ * next_h + (1-lambda_) * next_s_wgt
-        value = jax.lax.select(c, 1.0,  h_wgt[0])
+        value = jax.lax.select(c, 1.0,  h_wgt[0].astype(jnp.float32))
         h = jnp.insert(h[:-1], 0, value)
         h = jax.lax.select(h_tgt[0] == 1, jnp.zeros(T).at[0].set(1), h)
 
@@ -120,7 +121,8 @@ class DeepLambdaSA(BaseSA):
             h = get_tgt(s_tgt, ys)
             return h
 
-        self.get_targets = jax.jit(get_targets)
+        # self.get_targets = jax.jit(get_targets)
+        self.get_targets = get_targets
 
         # Function to get weights
         get_ws = get_mapped_f_factory(
@@ -130,7 +132,8 @@ class DeepLambdaSA(BaseSA):
             w = get_ws(s_ws, h_ws, ys, cs)
             return w
         
-        self.get_weights = jax.jit(get_weights)
+        # self.get_weights = jax.jit(get_weights)
+        self.get_weights = get_weights
 
         # Losses
         def loss_fn(onl_params, inputs, targets, ws, mask):
@@ -175,7 +178,8 @@ class DeepLambdaSA(BaseSA):
 
             return model_state, loss
 
-        self.update = jax.jit(update)
+        # self.update = jax.jit(update)
+        self.update = update
 
     def get_train_test(self, test_size=.2):
         subkey = self._next_rng_key()
@@ -210,11 +214,11 @@ class DeepLambdaSA(BaseSA):
             for seqs, _, cs, ys, m, h_ws in train_gen:
 
                 seqs, cs, ys, m, h_ws = convert_to_jax_arrays(seqs, cs, ys, m, h_ws)
-                import ipdb; ipdb.set_trace()
+                
                 # Get targets
                 tgt_logits = self.forward(self.state.tgt_params, seqs)
                 log_hs = jax.nn.log_sigmoid(tgt_logits)
-                tgt_surv = jnp.exp(jnp.cumsum(log_hs - tgt_logits, axis=1))
+                tgt_surv = jnp.exp(jnp.cumsum(log_hs - tgt_logits, axis=-1))
                 s_ws = jnp.insert(tgt_surv, 0, 1.0, axis=-1)
                 s_ws = s_ws[:, :, :-1]
 

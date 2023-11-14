@@ -19,31 +19,31 @@ def pad_to(x1, shape):
     miss_cols = b2 - a2
     miss_rows = b1 - a1
 
-    res = jnp.hstack((x1, jnp.zeros((a1, miss_cols))))
-    res = jnp.vstack((res, jnp.zeros((miss_rows, b2))))
+    res = np.hstack((x1, np.zeros((a1, miss_cols))))
+    res = np.vstack((res, np.zeros((miss_rows, b2))))
     return res
 
 
 def get_single_target_and_mask(seq, t, c, landmark=False):
     h, _ = seq.shape
-    target = jnp.zeros((h, h))
-    h_ws = jnp.ones((h, h))
-    mask = jnp.ones_like(target)
+    target = np.zeros((h, h))
+    h_ws = np.ones((h, h))
+    mask = np.ones_like(target)
     if not c:  # Subject reached terminal state within the horizon.
-        target = jnp.eye(t)[::-1]
+        target = np.eye(t)[::-1]
         target = pad_to(target, shape=(h, h))
         if landmark:
-            h_ws = jnp.ones_like(target)
+            h_ws = np.ones_like(target)
             tt = t.item()
             if tt <= h:
-                h_ws = jnp.tril(jnp.ones_like(target), -(h-t.item()))[::-1]
+                h_ws = np.tril(np.ones_like(target), -(h-t.item()))[::-1]
                 mask_out = h - t
-                mask = mask.at[t:, :].set(jnp.zeros((mask_out, h)))
+                mask[t:, :] = np.zeros((mask_out, h))
         else:
             t_aux = min(t, seq.shape[0])
-            h_ws = jnp.ones((1, t_aux))
+            h_ws = np.ones((1, t_aux))
             h_ws = pad_to(h_ws, shape=(h, h))
-            mask = mask.at[1:, :].set(jnp.zeros((h-1, h)))
+            mask[1:, :] = np.zeros((h-1, h))
 
     return target, h_ws, mask
 
@@ -51,13 +51,11 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
 def pad_sequences(seqs, max_length):
     num_sequences = len(seqs)
     dim = seqs[0].shape[-1]
-    padded_sequences = jnp.full(
-        (num_sequences, max_length, dim), 0.0, dtype=jnp.float32)
+    padded_sequences = np.zeros((num_sequences, max_length, dim))
 
     for i, sequence in enumerate(seqs):
-        length = jnp.minimum(sequence.shape[0], max_length)
-        padded_sequences = padded_sequences.at[i, :length, :].set(
-            sequence[:length])
+        length = np.minimum(sequence.shape[0], max_length)
+        padded_sequences[i, :length, :] = sequence[:length]
 
     return padded_sequences
 

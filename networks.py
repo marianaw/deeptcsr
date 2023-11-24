@@ -75,35 +75,36 @@ class TCN(hk.Module):
             out = layer(out)
         return out
 
-    
+
 class MLP(hk.Module):
-  """One hidden layer perceptron, with normalization."""
+    """One hidden layer perceptron, with normalization."""
 
-  def __init__(
-      self,
-      hidden_size: int,
-      output_size: int,
-      bn_config: Mapping[Text, Any],
-      name: Text,
-  ):
-    super().__init__(name=name)
-    self._hidden_size = hidden_size
-    self._output_size = output_size
-    self._bn_config = bn_config
+    def __init__(
+        self,
+        hidden_size: int,
+        output_size: int,
+        bn_config: Mapping[Text, Any],
+        name: Text,
+    ):
+        super().__init__(name=name)
+        self._hidden_size = hidden_size
+        self._output_size = output_size
+        self._bn_config = bn_config
 
-    self.linear1 = hk.Linear(output_size=self._hidden_size, with_bias=True)
-    self.norm = hk.BatchNorm(**self._bn_config)
-    # self.norm = hk.LayerNorm(axis=-1,
-    #             create_scale=True,
-    #             create_offset=True)
-    self.linear2 = hk.Linear(output_size=self._output_size, with_bias=False)
+        self.linear1 = hk.Linear(output_size=self._hidden_size, with_bias=True)
+        self.norm = hk.BatchNorm(**self._bn_config)
+        # self.norm = hk.LayerNorm(axis=-1,
+        #             create_scale=True,
+        #             create_offset=True)
+        self.linear2 = hk.Linear(
+            output_size=self._output_size, with_bias=False)
 
-  def __call__(self, inputs: jnp.ndarray, is_training: bool) -> jnp.ndarray:
-    out = self.linear1(inputs)
-    out = self.norm(out, is_training=is_training)
-    out = jax.nn.relu(out)
-    out = self.linear2(out)
-    return out
+    def __call__(self, inputs: jnp.ndarray, is_training: bool) -> jnp.ndarray:
+        out = self.linear1(inputs)
+        out = self.norm(out, is_training=is_training)
+        out = jax.nn.relu(out)
+        out = self.linear2(out)
+        return out
 
 
 class CoxLinearModel(hk.Module):
@@ -115,8 +116,39 @@ class CoxLinearModel(hk.Module):
         self.beta = hk.get_parameter("beta", (n_feats,), init=jnp.zeros)
         self.alpha = hk.get_parameter("alpha", (horizon, ), init=jnp.zeros)
 
-    def __call__(self, xs):   
+    def __call__(self, xs):
         return (
             jnp.expand_dims(jnp.dot(xs, self.beta), axis=self.axis)
             + self.alpha
         )
+
+
+class TSTransformer(hk.Module):
+    def __init__(self, hidden_size, seq_len, output_dim, dropout=0.2, num_layers=3, seed=42):
+        super(TSTransformer, self).__init__()
+        self.hidden_size = hidden_size
+        self.dropout = dropout
+        self.num_layers = num_layers
+        self.seq_len = seq_len
+        self.output_dim = output_dim
+        self.keys_seq = hk.PRNGSequence(seed)
+
+    def __call__(self, x):
+        x = hk.Linear(self.hidden_size)(x)
+        mask = self._get_mask_future()
+        w_init = hk.initializers.VarianceScaling(2 / self.num_layers)
+        for _ in range(self.num_layers):
+            x = hk.MultiHeadAttention(num_heads=4,
+                                      key_size=16,
+                                      model_size=self.hidden_size,
+                                      w_init=w_init)(x, x, mask)
+            x = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(x)
+            x = hk.Linear(self.hidden_size)(x)
+            x = hk.dropout(next(self.keys_seq), self.dropout, x)
+
+        return x
+
+    def _get_mask_future(self):
+        n = self.seq_len
+        mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))
+        return mask

@@ -9,7 +9,7 @@ output_file: Results/aids/{}/
 landmark: True
 target_lr: .01
 arch:
-  deep: False
+  type: linear
   arch_kwargs:
     num_inputs: 39
     num_channels: [64, 32, 16]
@@ -20,8 +20,8 @@ arch:
 preprocessed_data: False
 dataset_kwargs:
   horizon: 5
-  data_path: /home/mvargas/code/Huawei/Data/aids-seqs.pkl
-  # data_path: /Users/mariana/Documents/projects/Huawei/tdsurv/data/aids-seqs.pkl
+  # data_path: /home/mvargas/code/Huawei/Data/aids-seqs.pkl
+  data_path: /Users/mariana/Documents/projects/Huawei/tdsurv/data/aids-seqs.pkl
 
 lambda_: 0.1
 num_steps: 5

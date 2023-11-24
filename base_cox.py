@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import haiku as hk
 import optax
 
-from networks import TCN, CoxLinearModel, get_update_and_apply
+from networks import TCN, CoxLinearModel, TSTransformer, get_update_and_apply
 from utils import convert_to_jax_arrays, get_data, kaplan_meier, load_preprocessed_dataset
 
 
@@ -92,34 +92,41 @@ class BaseSA:
                      'target': h_tgt,
                      'mask': mask}
 
-        if self.config.arch['deep']:
-            arch_kwargs = self.config.arch['arch_kwargs']
+        # Define architecture
+        arch_type = self.config.arch['type']
+        arch_kwargs = self.config.arch['arch_kwargs']
+        arch_kwargs['seed'] = seed
+        if arch_type == 'tcn':
             dim = arch_kwargs['num_channels'][-1]
 
-            def apply_backbone(x):
+            def forward_fn(x):
                 tcn = TCN(**arch_kwargs)
                 # (batch, channels, H)
                 perm_x = jnp.transpose(x, axes=(0, 2, 1))
                 out = tcn(perm_x)
                 # (batch, H, channels)
                 out = jnp.transpose(out, axes=(0, 2, 1))
+                out = hk.Linear(self.horizon)(out)
                 return out
+        
+        elif arch_type == 'transformer':
+            def forward_fn(x):
+                ts_transformer = TSTransformer(**arch_kwargs)
+                x = ts_transformer(x)
+                x = hk.Linear(self.horizon)(x)
+                return x 
 
-        else:
+        elif arch_type == 'linear':
             dim = seqs.shape[-1]
 
-            def apply_backbone(x):
-                # In the simples case we don't process the input data at all.
-                return x
-
-        self.backbone = hk.without_apply_rng(
-            hk.transform(apply_backbone)).apply
-
-        # Encoder
-        def forward_fn(x):
-            cox = CoxLinearModel(dim, H, axis=self.config.axis)
-            out = apply_backbone(x)
-            return cox(out)
+            # Encoder
+            def forward_fn(x):
+                cox = CoxLinearModel(dim, H, axis=self.config.axis)
+                out = cox(x)
+                return out
+            
+        else:
+            raise Exception('Backbone not understood, should be transfomer, linear, or tcn.')
 
         _some_input = jnp.array(self.data['seqs'][:2])
         _key = self._next_rng_key()
@@ -192,13 +199,26 @@ class BaseSA:
         return subkey
 
     # Scores
-    def scores(self, x):
-        backbone_params = {
-            key: value for key, value in self.state.params.items() if 'tcn_scores' in key}
-        beta = self.state.params['cox_linear_model']['beta']
+    def scores(self, x, q=0.5):
 
-        out = self.backbone(backbone_params, x)
-        return -jnp.dot(out, beta)
+        def median_fn(surv):
+            mask = jnp.where(surv > q, 1, 0)
+            idx = jnp.maximum(0, mask.sum()-1)
+            return surv[idx]
+
+        median = jax.vmap(median_fn)
+        surv = self.survival_curve(x)
+        if len(surv.shape) == 2:
+            scores = median(surv)
+        else:
+            scores = median(surv[:,0])
+        return scores
+        # backbone_params = {
+        #     key: value for key, value in self.state.params.items() if 'tcn_scores' in key}
+        # beta = self.state.params['cox_linear_model']['beta']
+
+        # out = self.backbone(backbone_params, x)
+        # return -jnp.dot(out, beta)
 
     def train_step(self, train_gen):
         epoch_loss = 0.0

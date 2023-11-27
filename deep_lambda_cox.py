@@ -224,7 +224,10 @@ class DeepLambdaSA(BaseSA):
             train_gen, test_gen = self.get_train_test()
 
         losses = []
-        for epoch in tqdm(range(self.config.num_epochs)):
+        iter_range = range(self.config.num_epochs)
+        if self.config.verbose:
+            iter_range = tqdm(iter_range)
+        for epoch in iter_range:
             for seqs, _, cs, ys, m, h_ws in train_gen:
                 
                 seqs, cs, ys, m, h_ws = convert_to_jax_arrays(seqs, cs, ys, m, h_ws)

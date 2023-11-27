@@ -86,6 +86,8 @@ class BaseSA:
             seqs, ts, cs, h_tgt, h_ws, mask = get_data(self.config.dataset_name,
                                                        self.config.landmark,
                                                        self.config.dataset_kwargs)
+            seqs = seqs.astype(float)
+
         self.data = {'seqs': seqs,
                      'ts': ts,
                      'cs': cs,

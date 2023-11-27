@@ -7,7 +7,7 @@ weight_decay: 1.e-4
 num_epochs: 200
 output_file: Results/aids/{}/
 landmark: True
-target_lr: .01
+target_lr: .1
 arch:
   type: linear
   arch_kwargs:
@@ -25,3 +25,4 @@ dataset_kwargs:
 
 lambda_: 0.1
 num_steps: 5
+verbose: False

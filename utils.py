@@ -50,6 +50,33 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
     return target, h_ws, mask
 
 
+# def get_single_target_and_mask(seq, t, c, landmark=False):
+#     h, _ = seq.shape
+#     mask = np.ones((h, h))
+
+#     if c:  # Subject didn't die
+#         target = np.zeros((h, h))
+
+#     else:  # Subject reached terminal state within the horizon.
+#         target = np.eye(t)[::-1]
+#         target = pad_to(target, shape=(h, h))
+
+#     if landmark:
+#         h_ws = np.ones_like(target)
+#         tt = t.item()
+#         if tt <= h:
+#             h_ws = np.tril(np.ones_like(target), -(h-t.item()))[::-1]
+#             mask_out = h - t
+#             mask[t:, :] = np.zeros((mask_out, h))
+#     else:
+#         t_aux = min(t, seq.shape[0])
+#         h_ws = np.ones((1, t_aux))
+#         h_ws = pad_to(h_ws, shape=(h, h))
+#         mask[1:, :] = np.zeros((h-1, h))
+
+#     return target, h_ws, mask
+
+
 def pad_sequences(seqs, max_length):
     num_sequences = len(seqs)
     dim = seqs[0].shape[-1]
@@ -79,12 +106,12 @@ def get_data(dataset_name, landmark, kwargs):
 
 
 def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=False):
-    df_logs = pd.read_csv(os.path.join(data_path, 'surv_logs.csv'))
+    df_logs = pd.read_csv(os.path.join(data_path, 'surv_logs_last.csv'))
     df_logs = df_logs.drop(columns=['Unnamed: 0'])
     df_events = pd.read_csv(os.path.join(data_path, 'events.csv'))
     ts = df_events.time.values
     horizon = np.max(ts) if horizon is None else horizon
-    cs = df_events.censored.values
+    cs = df_events.censored.values.astype(bool)
     
     def pad_numeric_columns_array(group, length, padding_value=0):
         numeric_values = group.select_dtypes(include=np.number).values
@@ -99,6 +126,7 @@ def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=Fal
     df_logs = df_logs[['userid'] + list(numeric_columns)]
     seqs = df_logs.groupby('userid').apply(pad_numeric_columns_array, length=horizon)
     seqs = np.stack(seqs, axis=0)
+    ts = ts - cs.astype(int)
     return seqs, ts, cs
 
 

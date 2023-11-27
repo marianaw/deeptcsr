@@ -7,6 +7,8 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 from lifelines.utils import concordance_index as _concordance_index
+import pandas as pd
+from sklearn.discriminant_analysis import StandardScaler
 
 
 def pad_to(x1, shape):
@@ -63,7 +65,9 @@ def pad_sequences(seqs, max_length):
 def get_data(dataset_name, landmark, kwargs):
     loaders = {'aids': get_data_baseline,
                'single_task': get_single_task_dataset,
-               'mixed_tasks': get_mixed_task_dataset}
+               'mixed_tasks': get_mixed_task_dataset,
+               'churn_lastfm_months': get_churn_lastfm_dataset_months,
+               'churn_lastfm_days': get_churn_lastfm_dataset_days}
 
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)
@@ -72,6 +76,71 @@ def get_data(dataset_name, landmark, kwargs):
         raise Exception('type of dataset not found.')
 
     return seqs, ts, cs, target, h_ws, mask
+
+
+def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=False):
+    df_logs = pd.read_csv(os.path.join(data_path, 'surv_logs.csv'))
+    df_logs = df_logs.drop(columns=['Unnamed: 0'])
+    df_events = pd.read_csv(os.path.join(data_path, 'events.csv'))
+    ts = df_events.time.values
+    horizon = np.max(ts) if horizon is None else horizon
+    cs = df_events.censored.values
+    
+    def pad_numeric_columns_array(group, length, padding_value=0):
+        numeric_values = group.select_dtypes(include=np.number).values
+        pad_width = max(0, length - len(group))
+        padded_values = np.pad(numeric_values, ((0, pad_width), (0, 0)), constant_values=padding_value)
+        return padded_values
+
+    # Get sequences
+    numeric_columns = df_logs.select_dtypes(include=np.number).columns
+    # scaler = StandardScaler()
+    # df_logs[numeric_columns] = scaler.fit_transform(df_logs[numeric_columns])
+    df_logs = df_logs[['userid'] + list(numeric_columns)]
+    seqs = df_logs.groupby('userid').apply(pad_numeric_columns_array, length=horizon)
+    seqs = np.stack(seqs, axis=0)
+    return seqs, ts, cs
+
+
+def get_churn_lastfm_dataset_days(data_path, horizon=None, split=True, pad=False):
+    df_logs = pd.read_csv(os.path.join(data_path, 'surv_logs_days.csv'))
+    df_logs = df_logs.drop(columns=['Unnamed: 0'])
+    df_events = pd.read_csv(os.path.join(data_path, 'events.csv'))
+    ts = df_events.time.values
+    horizon = np.max(ts) if horizon is None else horizon
+    cs = df_events.censored.values
+    
+    # Get sequences
+    numeric_columns = df_logs.select_dtypes(include=np.number).columns
+    df_logs = df_logs[['userid'] + list(numeric_columns)]
+    user_ids = pd.unique(df_logs.userid)
+    seqs = []
+    for user_id in user_ids:
+        user_vals = df_logs[df_logs.userid == user_id][numeric_columns].values
+        seqs.append(user_vals)
+
+    if split:
+        arrs, tss, css = [], [], []
+        for seq in seqs:
+            arr, ts, cs = split_and_pad_last(seq, horizon)
+            arrs.append(arr)
+            css.append(cs)
+            tss.append(ts)
+        seqs = np.vstack(arrs)
+        ts = np.hstack(tss)
+        cs = np.hstack(css)
+
+    else:
+        ts = np.array([len(arr) for arr in seqs])
+        horizon = np.max(ts) if horizon is None else horizon
+        cs = np.where(ts > horizon, 1, 0)
+        pad = True
+
+    if pad:
+        seqs = pad_sequences(seqs, horizon)
+
+    ts = ts - cs.astype(int)
+    return seqs, ts, cs
 
 
 def load_preprocessed_dataset(data_path):
@@ -282,7 +351,7 @@ class TgtMskDataGenerator(BaseDataGenerator):
         # Shuffle the data using the same random key for X and y if shuffle is True
         if self.shuffle:
             np.random.shuffle(permutation)
-        
+
         if isinstance(X, jnp.ndarray):
             permutation = jnp.asarray(permutation)
 

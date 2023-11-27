@@ -34,3 +34,4 @@ dataset_kwargs:
 
 lambda_: 0.9
 num_steps: 5
+verbose: False

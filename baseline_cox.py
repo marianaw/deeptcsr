@@ -79,7 +79,10 @@ class SA(BaseSA):
         if train_gen is None:
             train_gen, test_gen = self.get_train_test()
         
-        for epoch in tqdm(range(self.config.num_epochs)):
+        iter_range = range(self.config.num_epochs)
+        if self.config.verbose:
+            iter_range = tqdm(iter_range)
+        for epoch in iter_range:
             tr_loss = self.train_step(train_gen)
             train_loss.append(tr_loss)
             if test_gen is not None:

@@ -1,0 +1,31 @@
+dataset_name: churn_lastfm_months
+batch_size: 128
+learning_rate: .01
+log_interval: 1000
+weight_decay: 1.e-6
+num_epochs: 100
+axis: 2
+landmark: True
+target_lr: .1
+arch:
+  type: linear
+  arch_kwargs:
+    hidden_size: 32
+    seq_len: 53  # Has to be the same as the horizon
+    output_dim: 16
+    num_layers: 3
+    dropout: 0.2
+
+# output_file: /Users/mariana/Documents/projects/Huawei/Results/{}/
+output_file: /home/mvargas/code/Huawei/Results/{}/
+
+preprocessed_data: False
+dataset_kwargs:
+  horizon: 53
+  data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/lastfm-dataset-1K
+  # data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
+  # data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1
+
+lambda_: 0.0
+num_steps: 5
+verbose: False

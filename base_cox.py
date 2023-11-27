@@ -33,6 +33,7 @@ class ConfigParams:
     axis: int
     arch: dict
     preprocessed_data: bool
+    verbose: bool
     landmark: bool = False
     output_file: str = None
     # horizon: int

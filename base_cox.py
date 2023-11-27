@@ -8,10 +8,9 @@ import jax
 import jax.numpy as jnp
 import haiku as hk
 import optax
-import pandas as pd
 
-from networks import CoxLinearModel, get_update_and_apply, HorizonBias
-from utils import TgtMskDataGenerator, batch_generator, get_data, kaplan_meier, train_test_split
+from networks import TCN, CoxLinearModel, TSTransformer, get_update_and_apply
+from utils import convert_to_jax_arrays, get_data, kaplan_meier, load_preprocessed_dataset
 
 
 Params = chex.ArrayTree
@@ -32,6 +31,8 @@ class ConfigParams:
     num_epochs: int
     dataset_kwargs: dict
     axis: int
+    arch: dict
+    preprocessed_data: bool
     landmark: bool = False
     output_file: str = None
     # horizon: int
@@ -72,30 +73,62 @@ class BaseSA:
         self.horizon = H
 
         # Random key
+        self.seed = seed
         self._key = jax.random.PRNGKey(seed)
 
         # dataset info
-        seqs, ts, cs, target, h_ws, mask = get_data(self.config.dataset_name,
-                                                    self.config.landmark,
-                                                    self.config.dataset_kwargs)
-
-        n = seqs.shape[0]
-        # seqs = jnp.concatenate((seqs, jnp.tile(jnp.eye(H), (n, 1, 1))), axis=-1)
+        if self.config.preprocessed_data:
+            data_path = self.config.dataset_kwargs['data_path']
+            seqs, ts, cs, h_tgt, h_ws, mask = load_preprocessed_dataset(
+                data_path)
+        else:
+            seqs, ts, cs, h_tgt, h_ws, mask = get_data(self.config.dataset_name,
+                                                       self.config.landmark,
+                                                       self.config.dataset_kwargs)
         self.data = {'seqs': seqs,
                      'ts': ts,
                      'cs': cs,
                      'h_ws': h_ws,
-                     'target': target,
+                     'target': h_tgt,
                      'mask': mask}
-        dim = seqs.shape[-1]
 
-        # Encoder
-        def forward_fn(x):
-            cox = CoxLinearModel(dim, H, axis=self.config.axis)
-            return cox(x)
+        # Define architecture
+        arch_type = self.config.arch['type']
+        arch_kwargs = self.config.arch['arch_kwargs']
+        arch_kwargs['seed'] = seed
+        if arch_type == 'tcn':
+            dim = arch_kwargs['num_channels'][-1]
 
-        _some_input = self.data['seqs'][:20]
-        # _some_input = _some_input.reshape(1, *_some_input.shape)
+            def forward_fn(x):
+                tcn = TCN(**arch_kwargs)
+                # (batch, channels, H)
+                perm_x = jnp.transpose(x, axes=(0, 2, 1))
+                out = tcn(perm_x)
+                # (batch, H, channels)
+                out = jnp.transpose(out, axes=(0, 2, 1))
+                out = hk.Linear(self.horizon)(out)
+                return out
+        
+        elif arch_type == 'transformer':
+            def forward_fn(x):
+                ts_transformer = TSTransformer(**arch_kwargs)
+                x = ts_transformer(x)
+                x = hk.Linear(self.horizon)(x)
+                return x 
+
+        elif arch_type == 'linear':
+            dim = seqs.shape[-1]
+
+            # Encoder
+            def forward_fn(x):
+                cox = CoxLinearModel(dim, H, axis=self.config.axis)
+                out = cox(x)
+                return out
+            
+        else:
+            raise Exception('Backbone not understood, should be transfomer, linear, or tcn.')
+
+        _some_input = jnp.array(self.data['seqs'][:2])
         _key = self._next_rng_key()
         forward = hk.without_apply_rng(hk.transform(forward_fn))
         params = forward.init(_key, _some_input)
@@ -165,11 +198,36 @@ class BaseSA:
         self._key, subkey = jax.random.split(self._key)
         return subkey
 
+    # Scores
+    def scores(self, x, q=0.5):
+
+        def median_fn(surv):
+            mask = jnp.where(surv > q, 1, 0)
+            idx = jnp.maximum(0, mask.sum()-1)
+            return surv[idx]
+
+        median = jax.vmap(median_fn)
+        surv = self.survival_curve(x)
+        if len(surv.shape) == 2:
+            scores = median(surv)
+        else:
+            scores = median(surv[:,0])
+        return scores
+        # backbone_params = {
+        #     key: value for key, value in self.state.params.items() if 'tcn_scores' in key}
+        # beta = self.state.params['cox_linear_model']['beta']
+
+        # out = self.backbone(backbone_params, x)
+        # return -jnp.dot(out, beta)
+
     def train_step(self, train_gen):
         epoch_loss = 0.0
         count = 0
 
         for X, y, m in train_gen:
+
+            X, y, m = convert_to_jax_arrays(X, y, m)
+            
             self.state, loss = self.update(
                 self.state,
                 X,
@@ -188,6 +246,7 @@ class BaseSA:
         epoch_loss = 0.0
         count = 0
         for X, y, m in test_gen:
+            X, y, m = convert_to_jax_arrays(X, y, m)
 
             # Get validation and test stats
             out = self.forward(
@@ -219,28 +278,29 @@ class BaseSA:
         surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=self.config.axis))
         return jnp.insert(surv, 0, 1.0, axis=self.config.axis)
 
-    def brier_score(self, h, surv, ts, cs, ms):
+    def brier_score(self, h, surv, ts, cs):
         cs = cs.astype(jnp.bool_)
         ws = kaplan_meier(ts - ~cs, ~cs)
 
         # Sequences that terminated.
         mask = jnp.where((ts <= h) & ~cs, 1, 0)
-        aux = (1/ws[ts-1]) * (0.0 - surv[:, h-1])**2 * mask * ms
+        aux = (1/ws[ts-1]) * (0.0 - surv[:, h-1])**2 * mask
         aux = jnp.where(jnp.isinf(aux), 0, aux)
         aux = jnp.where(jnp.isnan(aux), 0, aux)
         tot = jnp.sum(aux)
 
         # Sequences that are still active.
         mask = jnp.where((ts > h) | ((ts == h) & cs), 1, 0)
-        aux = (1 / ws[h - 1]) * (1.0 - surv[:, h - 1]) ** 2 * mask * ms
+        aux = (1 / ws[h - 1]) * (1.0 - surv[:, h - 1]) ** 2 * mask
         aux = jnp.where(jnp.isinf(aux), 0, aux)
         aux = jnp.where(jnp.isnan(aux), 0, aux)
         aux = jnp.sum(aux)
         tot += aux
         return tot
 
-    def integrated_brier_score(self, surv, ts, cs, ms):
-        brier = partial(self.brier_score, surv=surv, ts=ts, cs=cs, ms=ms)
+    # @jax.jit
+    def integrated_brier_score(self, surv, ts, cs):
+        brier = partial(self.brier_score, surv=surv, ts=ts, cs=cs)
         f = jax.vmap(brier)
         t_max = jnp.max(ts)
         hs = jnp.arange(1, t_max+1)
@@ -262,3 +322,21 @@ class BaseSA:
             idx = (ts > h) | ((ts == h) & cs)
             tot += jnp.sum((1 / ws[h - 1]) * (1.0 - surv[idx, h - 1]) ** 2)
         return tot / (t_max * len(ts))
+
+    def save(self):
+        if self.config.output_file is not None:
+            ext = f'seed_{self.seed}'
+            if self.config.dataset_name == 'single_task':
+                task_id = self.config.dataset_kwargs['task_id']
+                ext = ext + f'_taskid_{task_id}'
+
+            output_path = os.path.join(self.config.output_file,
+                                       self.config.dataset_name,
+                                       ext)
+
+            if not os.path.exists(output_path):
+                os.makedirs(output_path)
+            path_model = os.path.join(output_path, 'model.pt')
+            path_state = os.path.join(output_path, 'state.pt')
+            pickle.dump(self.state.params, open(path_model, 'wb'))
+            pickle.dump(self.state.opt_state, open(path_state, 'wb'))

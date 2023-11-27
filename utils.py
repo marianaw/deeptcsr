@@ -3,6 +3,7 @@ from math import ceil
 import os
 import h5py
 from pickle import load
+import numpy as np
 import jax
 import jax.numpy as jnp
 from lifelines.utils import concordance_index as _concordance_index
@@ -18,32 +19,31 @@ def pad_to(x1, shape):
     miss_cols = b2 - a2
     miss_rows = b1 - a1
 
-    res = jnp.hstack((x1, jnp.zeros((a1, miss_cols))))
-    res = jnp.vstack((res, jnp.zeros((miss_rows, b2))))
+    res = np.hstack((x1, np.zeros((a1, miss_cols))))
+    res = np.vstack((res, np.zeros((miss_rows, b2))))
     return res
 
 
 def get_single_target_and_mask(seq, t, c, landmark=False):
     h, _ = seq.shape
-    target = jnp.zeros((h, h))
-    h_ws = jnp.ones((h, h))
+    target = np.zeros((h, h))
+    h_ws = np.ones((h, h))
+    mask = np.ones_like(target)
     if not c:  # Subject reached terminal state within the horizon.
-        target = jnp.eye(t)[::-1]
+        target = np.eye(t)[::-1]
         target = pad_to(target, shape=(h, h))
         if landmark:
-            h_ws = jnp.ones_like(target)
+            h_ws = np.ones_like(target)
             tt = t.item()
             if tt <= h:
-                h_ws = jnp.tril(jnp.ones_like(target), -(h-t.item()))[::-1]
+                h_ws = np.tril(np.ones_like(target), -(h-t.item()))[::-1]
+                mask_out = h - t
+                mask[t:, :] = np.zeros((mask_out, h))
         else:
-            t = min(t, seq.shape[0])
-            h_ws = jnp.ones((1, t))
+            t_aux = min(t, seq.shape[0])
+            h_ws = np.ones((1, t_aux))
             h_ws = pad_to(h_ws, shape=(h, h))
-
-    mask = jnp.ones_like(target)
-    if t < h:
-        mask_out = h - t
-        mask = mask.at[t:, :].set(jnp.zeros((mask_out, h)))
+            mask[1:, :] = np.zeros((h-1, h))
 
     return target, h_ws, mask
 
@@ -51,13 +51,11 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
 def pad_sequences(seqs, max_length):
     num_sequences = len(seqs)
     dim = seqs[0].shape[-1]
-    padded_sequences = jnp.full(
-        (num_sequences, max_length, dim), 0.0, dtype=jnp.float32)
+    padded_sequences = np.zeros((num_sequences, max_length, dim))
 
     for i, sequence in enumerate(seqs):
-        length = jnp.minimum(sequence.shape[0], max_length)
-        padded_sequences = padded_sequences.at[i, :length, :].set(
-            sequence[:length])
+        length = np.minimum(sequence.shape[0], max_length)
+        padded_sequences[i, :length, :] = sequence[:length]
 
     return padded_sequences
 
@@ -65,7 +63,7 @@ def pad_sequences(seqs, max_length):
 def get_data(dataset_name, landmark, kwargs):
     loaders = {'aids': get_data_baseline,
                'single_task': get_single_task_dataset,
-               }
+               'mixed_tasks': get_mixed_task_dataset}
 
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)
@@ -76,21 +74,32 @@ def get_data(dataset_name, landmark, kwargs):
     return seqs, ts, cs, target, h_ws, mask
 
 
+def load_preprocessed_dataset(data_path):
+    data = h5py.File(data_path, 'r')
+    seqs = np.array(data['seqs'])
+    ts = np.array(data['ts'])
+    cs = np.array(data['cs']).astype(bool)
+    h_ws = np.array(data['h_ws']).astype(bool)
+    mask = np.array(data['mask']).astype(bool)
+    h_tgt = np.array(data['h_tgt'])
+    return seqs, ts, cs, h_tgt, h_ws, mask
+
+
 def split_and_pad_last(arr, H=1000):
     t, dim = arr.shape
     n_splits = ceil(t/H)
-    indices = jnp.arange(1, n_splits) * H
-    arrs = jnp.array_split(arr, indices_or_sections=indices)
+    indices = np.arange(1, n_splits) * H
+    arrs = np.array_split(arr, indices_or_sections=indices)
     last = arrs[-1]
     h, _ = last.shape
     if h < H:
-        zs = jnp.zeros((H-h, dim))
-        last = jnp.concatenate((last, zs))
-    arr = jnp.stack(arrs[:-1] + [last])
+        zs = np.zeros((H-h, dim))
+        last = np.concatenate((last, zs))
+    arr = np.stack(arrs[:-1] + [last])
 
     ts = t - indices
-    ts = jnp.hstack((jnp.array([t]), ts))
-    cs = jnp.hstack((jnp.ones_like(indices), jnp.array([0]))).astype(jnp.bool_)
+    ts = np.hstack((np.array([t]), ts))
+    cs = np.hstack((np.ones_like(indices), np.array([0]))).astype(bool)
     return arr, ts, cs
 
 
@@ -115,20 +124,58 @@ def get_single_task_dataset(task_id, data_path, horizon=None, split=True, pad=Fa
             arrs.append(arr)
             css.append(cs)
             tss.append(ts)
-        seqs = jnp.vstack(arrs)
-        ts = jnp.hstack(tss)
-        cs = jnp.hstack(css)
+        seqs = np.vstack(arrs)
+        ts = np.hstack(tss)
+        cs = np.hstack(css)
 
     else:
-        ts = jnp.array([len(arr) for arr in seqs])
-        horizon = jnp.max(ts) if horizon is None else horizon
-        cs = jnp.where(ts > horizon, 1, 0)
+        ts = np.array([len(arr) for arr in seqs])
+        horizon = np.max(ts) if horizon is None else horizon
+        cs = np.where(ts > horizon, 1, 0)
         pad = True
 
     if pad:
         seqs = pad_sequences(seqs, horizon)
 
-    ts = ts - cs.astype(jnp.int32)
+    ts = ts - cs.astype(int)
+    return seqs, ts, cs
+
+
+def get_mixed_task_dataset(data_path, horizon=None, split=True, pad=False):
+    seqs = []
+    for root, dirs, files in os.walk(data_path):
+        for filename in files:
+            if filename.endswith('.mat'):
+                file_path = os.path.join(root, filename)
+                with h5py.File(file_path, 'r') as f:
+                    if 'traces_self' in f:
+                        size = f['traces_self'].shape[0]
+                        # Extract the array under the 'traces_self' key
+                        t_self = [f['traces_self']
+                                  [i].reshape(-1, 39) for i in range(size)]
+                        seqs.extend(t_self)
+
+    if split:
+        arrs, tss, css = [], [], []
+        for seq in seqs:
+            arr, ts, cs = split_and_pad_last(seq, horizon)
+            arrs.append(arr)
+            css.append(cs)
+            tss.append(ts)
+        seqs = np.vstack(arrs)
+        ts = np.hstack(tss)
+        cs = np.hstack(css)
+
+    else:
+        ts = np.array([len(arr) for arr in seqs])
+        horizon = np.max(ts) if horizon is None else horizon
+        cs = np.where(ts > horizon, 1, 0)
+        pad = True
+
+    if pad:
+        seqs = pad_sequences(seqs, horizon)
+
+    ts = ts - cs.astype(int)
     return seqs, ts, cs
 
 
@@ -143,25 +190,27 @@ def get_targets_and_masks(seqs, ts, cs, landmark):
         h_ws.append(h_w)
         masks.append(mask)
 
-    target = jnp.stack(targets)
-    mask = jnp.stack(masks)
-    h_ws = jnp.stack(h_ws)
+    target = np.stack(targets)
+    mask = np.stack(masks).astype(bool)
+    h_ws = np.stack(h_ws).astype(bool)
     return target, h_ws, mask
 
 
 def get_data_baseline(data_path, horizon=None):
     data = load(open(data_path, 'rb'))
-    seqs = jnp.array(data['seqs'])
-    cs = jnp.array(data['cs'])
-    ts = jnp.array(data['ts'])
+    seqs = np.array(data['seqs'])
+    cs = np.array(data['cs'])
+    ts = np.array(data['ts'])
 
     return seqs, ts, cs
 
 
-def train_test_split(X, target, h_ws, mask, ts, cs, rng, test_size=0.2):
+def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2):
     # Shuffle the indices of the data
     num_samples = X.shape[0]
-    shuffled_indices = jax.random.permutation(rng, jnp.arange(num_samples))
+    shuffled_indices = np.arange(num_samples)
+    np.random.seed(seed)
+    np.random.shuffle(shuffled_indices)
 
     # Calculate the number of samples in the test set
     num_test_samples = int(num_samples * test_size)
@@ -184,7 +233,7 @@ def train_test_split(X, target, h_ws, mask, ts, cs, rng, test_size=0.2):
     cs_train = cs[train_indices]
     cs_test = cs[test_indices]
 
-    return X_train, X_test, y_train, y_test, hws_train, hws_test,\
+    return X_train, X_test, y_train, y_test, hws_train, hws_test, \
         m_train, m_test, ts_train, ts_test, cs_train, cs_test
 
 
@@ -229,19 +278,19 @@ class TgtMskDataGenerator(BaseDataGenerator):
         rng = self.rng
         num_samples = X.shape[0]
 
+        permutation = np.arange(num_samples)
         # Shuffle the data using the same random key for X and y if shuffle is True
         if self.shuffle:
-            rng, subkey = jax.random.split(rng)
-            permutation = jax.random.permutation(
-                subkey, jnp.arange(num_samples))
-            X = X[permutation]
-            y = y[permutation]
-            mask = mask[permutation]
+            np.random.shuffle(permutation)
+        
+        if isinstance(X, jnp.ndarray):
+            permutation = jnp.asarray(permutation)
 
         for i in range(0, num_samples, batch_size):
-            batch_X = X[i:i + batch_size]
-            batch_y = y[i:i + batch_size]
-            batch_m = mask[i:i + batch_size]
+            idx = permutation[i:i + batch_size]
+            batch_X = X[idx]
+            batch_y = y[idx]
+            batch_m = mask[idx]
             yield batch_X, batch_y, batch_m
 
 
@@ -257,44 +306,22 @@ class TimesDataGenerator(BaseDataGenerator):
         rng = self.rng
         num_samples = X.shape[0]
 
+        permutation = np.arange(num_samples)
         # Shuffle the data using the same random key for X and y if shuffle is True
         if self.shuffle:
-            rng, subkey = jax.random.split(rng)
-            permutation = jax.random.permutation(
-                subkey, jnp.arange(num_samples))
-            X = X[permutation]
-            cs = cs[permutation]
-            ts = ts[permutation]
-            ys = ys[permutation]
-            mask = mask[permutation]
-            h_ws = h_ws[permutation]
+            np.random.shuffle(permutation)
+        if isinstance(X, jnp.ndarray):
+            permutation = jnp.asarray(permutation)
 
         for i in range(0, num_samples, batch_size):
-            batch_X = X[i:i + batch_size]
-            batch_ts = ts[i:i + batch_size]
-            batch_cs = cs[i:i + batch_size]
-            batch_ys = ys[i:i + batch_size]
-            batch_m = mask[i:i + batch_size]
-            batch_hws = h_ws[i:i + batch_size]
+            idx = permutation[i:i + batch_size]
+            batch_X = X[idx]
+            batch_ts = ts[idx]
+            batch_cs = cs[idx]
+            batch_ys = ys[idx]
+            batch_m = mask[idx]
+            batch_hws = h_ws[idx]
             yield batch_X, batch_ts, batch_cs, batch_ys, batch_m, batch_hws
-
-
-def batch_generator(X, y, mask, batch_size, rng, shuffle=True):
-    num_samples = X.shape[0]
-
-    # Shuffle the data using the same random key for X and y if shuffle is True
-    if shuffle:
-        rng, subkey = jax.random.split(rng)
-        permutation = jax.random.permutation(subkey, jnp.arange(num_samples))
-        X = X[permutation]
-        y = y[permutation]
-        mask = mask[permutation]
-
-    for i in range(0, num_samples, batch_size):
-        batch_X = X[i:i + batch_size]
-        batch_y = y[i:i + batch_size]
-        batch_m = mask[i:i + batch_size]
-        yield batch_X, batch_y, batch_m
 
 
 def kaplan_meier(ts, cs):
@@ -378,3 +405,8 @@ def unroll_time(xs, ts, cs, ms, T):
     ms_ = ms.any(-1, keepdims=True)
     ms_ = ms_.reshape(-1)
     return xs_, ts_, cs_, ms_
+
+
+def convert_to_jax_arrays(*numpy_arrays):
+    jax_arrays = (jnp.asarray(arr) for arr in numpy_arrays)
+    return jax_arrays

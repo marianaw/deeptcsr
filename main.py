@@ -8,6 +8,7 @@ import gc
 
 from lambda_cox import LambdaSA
 from baseline_cox import SA
+from deep_lambda_cox import DeepLambdaSA
 
 
 os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.9"  # see https://github.com/google/jax/discussions/6332#discussioncomment-1279991
@@ -21,7 +22,7 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='exp_1', 
                         help='exp name')
     parser.add_argument('--agent', type=str, default='SA',
-                        help='SA or LambdaSA')
+                        help='SA or LambdaSA or DeepLambdaSA')
     parser.add_argument('--seed', help='Experiment seed', type=int, default=42)
     args = parser.parse_args()
 
@@ -39,15 +40,18 @@ if __name__ == '__main__':
         agent = SA(config, seed)
     elif type_agent == 'LambdaSA':
         agent = LambdaSA(config, seed)
+    elif type_agent == 'DeepLambdaSA':
+        agent = DeepLambdaSA(config, seed)
     else:
         raise Exception('Agent type not found')
 
     try:
         agent.train()
-        # copyfile(config_path, os.path.join(output_file, 'config.yaml'))
+        agent.save()
         config_path = os.path.join(output_file, 'config.yaml')
         with open(config_path, 'w') as outfile:
             yaml.dump(config, outfile, default_flow_style=False)
+        
     except KeyboardInterrupt:
         gc.collect()
         pass

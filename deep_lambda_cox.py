@@ -1,13 +1,12 @@
 from functools import partial
-import os
 import chex
 import jax
 import jax.numpy as jnp
 import optax
-import pandas as pd
 from base_cox import BaseSA, ConfigParams, Params
-from utils import TimesDataGenerator, train_test_split, unroll
+from utils import TimesDataGenerator, convert_to_jax_arrays, train_test_split
 from dataclasses import dataclass
+from tqdm import tqdm
 
 
 @jax.jit
@@ -30,14 +29,16 @@ class Config(ConfigParams):
 @chex.dataclass(frozen=True)
 class ModelState:
     """A structure of the current model state"""
-    onl_params: Params
+    params: Params
     tgt_params: Params
     opt_state: optax.OptState
 
 
-def _get_targets(b_tgt, h_tgt, lambda_, T):
-    stgt_init = jnp.insert(b_tgt[T-1, 1:], T, 0)
-    htgt_init = jnp.zeros(T,)
+def _get_targets(b_tgt, h_tgt, lambda_, T, b_size):
+    b_size = min(b_size, b_tgt.shape[0])
+    stgt_init = jnp.roll(b_tgt[:, T-1], -1)
+    stgt_init = stgt_init.at[:, T-1].set(0.0)
+    htgt_init = jnp.zeros((b_size, T))
     carry_init = (stgt_init, htgt_init)
 
     def f(carry, h):
@@ -45,42 +46,61 @@ def _get_targets(b_tgt, h_tgt, lambda_, T):
         h_tgt, b_tgt = h
 
         h = lambda_ * next_h + (1-lambda_) * next_b_tgt
-        h = jnp.insert(h[:-1], 0, h_tgt[0])
-        h = jax.lax.select(h_tgt[0] == 1, jnp.zeros(T).at[0].set(1), h)
+        h = jnp.roll(h, 1)
+        h = h.at[:, 0].set(h_tgt[:, 0])
+        cond = h_tgt[:, 0] == 1
+        h = jnp.where(cond[:, None], jnp.zeros((b_size, T)).at[:, 0].set(1), h)
 
         carry = (b_tgt, h)
         return carry, h
-
-    _, out = jax.lax.scan(f, carry_init, (h_tgt, b_tgt), reverse=True)
+    
+    h_aux = jnp.transpose(h_tgt, (1, 0, 2))
+    s_aux = jnp.transpose(b_tgt, (1, 0, 2))
+    _, out = jax.lax.scan(f, carry_init, (h_aux, s_aux), reverse=True)
+    out = jnp.transpose(out, (1, 0, 2))
     return out
 
 
-def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T):
-    w_init = s_wgt[T-1]
-    w_init = jnp.insert(w_init[:-1], 0, 1.0)
-    w_init = jax.lax.select(c, jnp.ones(T), w_init)
-    carry_init = (s_wgt[T-1], w_init)
+def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, b_size):
+    b_size = min(b_size, s_wgt.shape[0])
+    w_init = s_wgt[:, T-1]
+    w_init = jnp.roll(w_init, 1)
+    w_init = w_init.at[:, 0].set(1.0)
 
+    w_init = jnp.where(c[:, None], jnp.ones((b_size, T)), w_init)
+    carry_init = (s_wgt[:, T-1], w_init)
+    
     def f(carry, h):
         next_s_wgt, next_h = carry
         h_tgt, h_wgt, s_wgt = h
 
         h = lambda_ * next_h + (1-lambda_) * next_s_wgt
-        value = jax.lax.select(c, 1.0,  h_wgt[0])
-        h = jnp.insert(h[:-1], 0, value)
-        h = jax.lax.select(h_tgt[0] == 1, jnp.zeros(T).at[0].set(1), h)
+        # value = jnp.where(c[:, None], 1.0, h_wgt[:, 0].astype(jnp.float32))
+        aux = jnp.ones_like(h_wgt[:, 0]).astype(jnp.float32)
+        value = jax.lax.select(c, aux,  h_wgt[:, 0].astype(jnp.float32))
+        h = jnp.roll(h, 1)
+        h = h.at[:, 0].set(value)
+
+        cond = h_tgt[:, 0] == 1
+        h = jnp.where(cond[:, None], jnp.zeros((b_size, T)).at[:, 0].set(1), h)
 
         carry = (s_wgt, h)
         return carry, h
+    
+    y_aux = jnp.transpose(h_tgt, (1, 0, 2))
+    h_aux = jnp.transpose(h_wgt, (1, 0, 2))
+    s_aux = jnp.transpose(s_wgt, (1, 0, 2))
 
-    _, out = jax.lax.scan(f, carry_init, (h_tgt, h_wgt, s_wgt), reverse=True)
+    _, out = jax.lax.scan(f, carry_init, (y_aux, h_aux, s_aux), reverse=True)
+
+    out = jnp.transpose(out, (1, 0, 2))
     return out
 
 
-def get_mapped_f_factory(f, lambda_, T, in_axis):
-    single_f = partial(f, lambda_=lambda_, T=T)
-    batched_f = jax.vmap(single_f, in_axes=in_axis)
-    return batched_f
+# def get_mapped_f_factory(f, lambda_, T, in_axis):
+#     single_f = partial(f, lambda_=lambda_, T=T)
+#     batched_f = jax.vmap(single_f, in_axes=in_axis)
+#     return batched_f
 
 
 class DeepLambdaSA(BaseSA):
@@ -104,45 +124,34 @@ class DeepLambdaSA(BaseSA):
         params, opt_state = self.state.values()
 
         # Online and Target initializations
-        onl_params = params
         tgt_params = jax.tree_map(jnp.copy, params)
 
         # Update model state
         self.state = ModelState(
-            onl_params=onl_params,
+            params=params,
             tgt_params=tgt_params,
             opt_state=opt_state,
         )
 
-        # Function to get the targets
-        get_tgt = get_mapped_f_factory(
-                _get_targets, self.lambda_, self.horizon, in_axis=(0, 0))
-        
-        def get_targets(X, ys):
-            s_tgt = self.forward(self.state.tgt_params, X)
-            h = get_tgt(s_tgt, ys)
+        def get_targets(tgt_logits, ys):
+            s_tgt = jax.nn.sigmoid(tgt_logits)
+            h = _get_targets(s_tgt, ys, self.lambda_, self.horizon, self.config.batch_size)
             return h
 
         self.get_targets = jax.jit(get_targets)
+        # self.get_targets = get_targets
 
-        # Function to get weights
-        get_ws = get_mapped_f_factory(
-                _get_weights, self.lambda_, self.horizon, in_axis=(0, 0, 0, 0))
-        
-        def get_weights(X, ys, cs, h_ws):
-            logits = self.forward(self.state.tgt_params, X)
-            log_hs = jax.nn.log_sigmoid(logits)
-            surv = jnp.exp(jnp.cumsum(log_hs - logits, axis=1))
-            s_ws = jnp.insert(surv, 0, 1.0, axis=-1)
-            s_ws = s_ws[:, :, :-1]
-            w = get_ws(s_ws, h_ws, ys, cs)
+        def get_weights(s_ws, ys, cs, h_ws):
+            w = _get_weights(s_ws, h_ws, ys, cs,
+                             self.lambda_, self.horizon, self.config.batch_size)
             return w
         
         self.get_weights = jax.jit(get_weights)
+        # self.get_weights = get_weights
 
         # Losses
-        def loss_fn(params, inputs, targets, ws, mask):
-            logits = self.forward(params, inputs)
+        def loss_fn(onl_params, inputs, targets, ws, mask):
+            logits = self.forward(onl_params, inputs)
             assert logits.shape == targets.shape
             loss = bce_logits(targets, logits)
             loss = jnp.mean(loss * ws * mask)
@@ -176,7 +185,7 @@ class DeepLambdaSA(BaseSA):
 
             # Update model state
             model_state = model_state.replace(
-                onl_params=onl_params,
+                params=onl_params,
                 tgt_params=tgt_params,
                 opt_state=opt_state
             )
@@ -184,6 +193,7 @@ class DeepLambdaSA(BaseSA):
             return model_state, loss
 
         self.update = jax.jit(update)
+        # self.update = update
 
     def get_train_test(self, test_size=.2):
         subkey = self._next_rng_key()
@@ -194,7 +204,7 @@ class DeepLambdaSA(BaseSA):
                                                                                      self.data['mask'],
                                                                                      self.data['ts'],
                                                                                      self.data['cs'],
-                                                                                     rng=subkey,
+                                                                                     seed=self.seed,
                                                                                      test_size=test_size)
         subkey = self._next_rng_key()
         train_gen = TimesDataGenerator(X=X_train, h_ws=hws_train,
@@ -208,18 +218,26 @@ class DeepLambdaSA(BaseSA):
                                       batch_size=self.config.batch_size, rng=subkey)
         return train_gen, test_gen
 
-    def train(self, train_gen=None):
+    def train(self, train_gen=None, test_gen=None):
 
         if train_gen is None:
-            train_gen, _ = self.get_train_test()
+            train_gen, test_gen = self.get_train_test()
 
         losses = []
-        for epoch in range(self.config.num_epochs):
-            for seqs, ts, cs, ys, m, h_ws in train_gen:
+        for epoch in tqdm(range(self.config.num_epochs)):
+            for seqs, _, cs, ys, m, h_ws in train_gen:
+                
+                seqs, cs, ys, m, h_ws = convert_to_jax_arrays(seqs, cs, ys, m, h_ws)
 
                 # Get targets
-                h = self.get_targets(seqs, ys)
-                ws = self.get_weights(seqs, ys, cs, h_ws)
+                tgt_logits = self.forward(self.state.tgt_params, seqs)
+                log_hs = jax.nn.log_sigmoid(tgt_logits)
+                s_ws = jnp.exp(jnp.cumsum(log_hs - tgt_logits, axis=-1))
+                s_ws = jnp.roll(s_ws, 1)
+                s_ws = s_ws.at[:, :, 0].set(1.0)
+
+                h = self.get_targets(tgt_logits, ys)
+                ws = self.get_weights(s_ws, ys, cs, h_ws)
 
                 self.state, loss = self.update(
                     self.state,

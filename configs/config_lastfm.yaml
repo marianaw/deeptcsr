@@ -3,7 +3,7 @@ batch_size: 128
 learning_rate: .01
 log_interval: 1000
 weight_decay: 1.e-10
-num_epochs: 100
+num_epochs: 200
 axis: 2
 landmark: True
 target_lr: .1
@@ -23,6 +23,7 @@ preprocessed_data: False
 dataset_kwargs:
   horizon: 53
   data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/lastfm-dataset-1K
+  use_static_fs: True
   # data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
   # data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1
 

@@ -36,9 +36,9 @@ def get_single_target_and_mask(seq, t, c, landmark=False):
         target = pad_to(target, shape=(h, h))
         if landmark:
             h_ws = np.ones_like(target)
-            tt = t.item()
+            tt = t.item() if isinstance(t, np.ndarray) else t
             if tt <= h:
-                h_ws = np.tril(np.ones_like(target), -(h-t.item()))[::-1]
+                h_ws = np.tril(np.ones_like(target), -(h-t))[::-1]
                 mask_out = h - t
                 mask[t:, :] = np.zeros((mask_out, h))
         else:
@@ -103,6 +103,43 @@ def get_data(dataset_name, landmark, kwargs):
         raise Exception('type of dataset not found.')
 
     return seqs, ts, cs, target, h_ws, mask
+
+
+def get_churn_kkbox(data_path, horizon=None, split=True, pad=False, use_static_fs=False):
+    df_logs = pd.read_feather(os.path.join(data_path, 'logs_filtered_preprocessed.feather'))
+    df_events = pd.read_feather(os.path.join(data_path, 'survival_preprocessed.feather'))
+    ts = df_events.time
+    cs = df_events.event
+    horizon = np.max(ts) if horizon is None else horizon
+    
+    def pad_numeric_columns_array(group, length, padding_value=0):
+        numeric_values = group.select_dtypes(include=np.number).values
+        pad_width = max(0, length - len(group))
+        padded_values = np.pad(numeric_values, ((0, pad_width), (0, 0)), constant_values=padding_value)
+        return padded_values
+
+    # Get sequences
+    numeric_columns = df_logs.select_dtypes(include=np.number).columns
+    # scaler = StandardScaler()
+    # df_logs[numeric_columns] = scaler.fit_transform(df_logs[numeric_columns])
+    df_logs = df_logs[['msno'] + list(numeric_columns)]
+    
+    # if use_static_fs:
+    #     result_df = pd.DataFrame()
+    #     prof = pd.read_csv(os.path.join(data_path, 'user_static_features.csv'))
+    #     prof = prof.drop(columns=['Unnamed: 0'])
+    #     grouped_df = df_logs.groupby('msno')
+    #     for user_id, group_df in grouped_df:
+    #         prof_row = prof[prof['#id'] == user_id]
+    #         repeated_prof = pd.concat([prof_row] * len(group_df), ignore_index=True)
+    #         concatenated_df = pd.concat([group_df.reset_index(drop=True), repeated_prof], axis=1)
+    #         result_df = pd.concat([result_df, concatenated_df], ignore_index=True)
+    #     df_logs = result_df
+
+    seqs = df_logs.groupby('msno').apply(pad_numeric_columns_array, length=horizon)
+    seqs = np.stack(seqs, axis=0)
+    ts = ts - cs.astype(int)
+    return seqs, ts, cs
 
 
 def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=False, use_static_fs=False):

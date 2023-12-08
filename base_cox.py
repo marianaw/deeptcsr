@@ -87,6 +87,7 @@ class BaseSA:
         else:
             seqs, ts, cs, h_tgt, h_ws, mask = get_data(self.config.dataset_name,
                                                        self.config.landmark,
+                                                       self.config.calculate_tgt_and_mask,
                                                        self.config.dataset_kwargs)
             seqs = seqs.astype(float)
 

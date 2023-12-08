@@ -23,7 +23,7 @@ preprocessed_data: False
 calculate_tgt_and_mask: False
 dataset_kwargs:
   horizon: 53
-  data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/lastfm-dataset-1K
+  data_path: /home/mvargas/code/Huawei/SurvanData/kkbox-churn-prediction-challenge/kkbox
   use_static_fs: True
   # data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
   # data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1

@@ -89,7 +89,7 @@ def pad_sequences(seqs, max_length):
     return padded_sequences
 
 
-def get_data(dataset_name, landmark, kwargs):
+def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
     loaders = {'aids': get_data_baseline,
                'single_task': get_single_task_dataset,
                'mixed_tasks': get_mixed_task_dataset,
@@ -98,7 +98,10 @@ def get_data(dataset_name, landmark, kwargs):
 
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)
-        target, h_ws, mask = get_targets_and_masks(seqs, ts, cs, landmark)
+        if calculate_tgt_and_mask:
+            target, h_ws, mask = get_targets_and_masks(seqs, ts, cs, landmark)
+        else:
+            target, h_ws, mask = None, None, None
     except KeyError:
         raise Exception('type of dataset not found.')
 
@@ -369,16 +372,23 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2):
     # Use the indices to split the data
     X_train = X[train_indices]
     X_test = X[test_indices]
-    y_train = target[train_indices]
-    y_test = target[test_indices]
-    hws_train = h_ws[train_indices]
-    hws_test = h_ws[test_indices]
-    m_train = mask[train_indices]
-    m_test = mask[test_indices]
     ts_train = ts[train_indices]
     ts_test = ts[test_indices]
     cs_train = cs[train_indices]
     cs_test = cs[test_indices]
+
+    if target is not None and h_ws is not None and mask is not None:
+        y_train = target[train_indices]
+        y_test = target[test_indices]
+        hws_train = h_ws[train_indices]
+        hws_test = h_ws[test_indices]
+        m_train = mask[train_indices]
+        m_test = mask[test_indices]
+    
+    else:
+        y_train, y_test = None, None
+        hws_train, hws_test = None, None
+        m_train, m_test = None, None
 
     return X_train, X_test, y_train, y_test, hws_train, hws_test, \
         m_train, m_test, ts_train, ts_test, cs_train, cs_test
@@ -469,6 +479,30 @@ class TimesDataGenerator(BaseDataGenerator):
             batch_m = mask[idx]
             batch_hws = h_ws[idx]
             yield batch_X, batch_ts, batch_cs, batch_ys, batch_m, batch_hws
+
+
+class LazyTimesDataGenerator(BaseDataGenerator):
+    def batch_generator(self):
+        X = self.X
+        ts = self.ts
+        cs = self.cs
+        batch_size = self.batch_size
+        rng = self.rng
+        num_samples = X.shape[0]
+
+        permutation = np.arange(num_samples)
+        # Shuffle the data using the same random key for X and y if shuffle is True
+        if self.shuffle:
+            np.random.shuffle(permutation)
+        if isinstance(X, jnp.ndarray):
+            permutation = jnp.asarray(permutation)
+
+        for i in range(0, num_samples, batch_size):
+            idx = permutation[i:i + batch_size]
+            batch_X = X[idx]
+            batch_ts = ts[idx]
+            batch_cs = cs[idx]
+            yield batch_X, batch_ts, batch_cs
 
 
 def kaplan_meier(ts, cs):

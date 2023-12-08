@@ -20,6 +20,7 @@ arch:
 output_file: /home/mvargas/code/Huawei/Results/{}/
 
 preprocessed_data: False
+calculate_tgt_and_mask: True
 dataset_kwargs:
   horizon: 53
   data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/lastfm-dataset-1K

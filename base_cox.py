@@ -10,7 +10,7 @@ import haiku as hk
 import optax
 
 from networks import TCN, CoxLinearModel, TSTransformer, get_update_and_apply
-from utils import convert_to_jax_arrays, get_data, kaplan_meier, load_preprocessed_dataset
+from utils import convert_to_jax_arrays, get_data, get_targets_and_masks, kaplan_meier, load_preprocessed_dataset
 
 
 Params = chex.ArrayTree
@@ -34,6 +34,7 @@ class ConfigParams:
     arch: dict
     preprocessed_data: bool
     verbose: bool
+    calculate_tgt_and_mask: bool = True
     landmark: bool = False
     output_file: str = None
     # horizon: int
@@ -72,6 +73,7 @@ class BaseSA:
         self.config = ConfigParams.from_dict(config_kwargs)
         H = self.config.dataset_kwargs['horizon']
         self.horizon = H
+        self.calculate_tgt_and_mask_at_epoch = not self.config.calculate_tgt_and_mask
 
         # Random key
         self.seed = seed
@@ -227,7 +229,14 @@ class BaseSA:
         epoch_loss = 0.0
         count = 0
 
-        for X, y, m in train_gen:
+        for batch in train_gen:
+            if self.calculate_tgt_and_mask_at_epoch:
+                X, ts, cs = batch
+                
+                # hard target and weights calculation:
+                y, m, _ = get_targets_and_masks(X, ts, cs, self.config.landmark)
+            else:
+                X, y, m = batch
 
             X, y, m = convert_to_jax_arrays(X, y, m)
             

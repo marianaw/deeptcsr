@@ -94,7 +94,8 @@ def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
                'single_task': get_single_task_dataset,
                'mixed_tasks': get_mixed_task_dataset,
                'churn_lastfm_months': get_churn_lastfm_dataset_months,
-               'churn_lastfm_days': get_churn_lastfm_dataset_days}
+               'churn_lastfm_days': get_churn_lastfm_dataset_days,
+               'churn_kkbox': get_churn_kkbox}
 
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)

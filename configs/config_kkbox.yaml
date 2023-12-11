@@ -11,7 +11,7 @@ arch:
   type: transformer
   arch_kwargs:
     hidden_size: 16
-    seq_len: 53  # Has to be the same as the horizon
+    seq_len: 45  # Has to be the same as the horizon
     output_dim: 8
     num_layers: 1
     dropout: 0.05
@@ -22,7 +22,7 @@ output_file: /home/mvargas/code/Huawei/Results/{}/
 preprocessed_data: False
 calculate_tgt_and_mask: False
 dataset_kwargs:
-  horizon: 53
+  horizon: 45
   data_path: /home/mvargas/code/Huawei/SurvanData/kkbox-churn-prediction-challenge/kkbox
   use_static_fs: True
   # data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/

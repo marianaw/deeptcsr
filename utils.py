@@ -124,22 +124,7 @@ def get_churn_kkbox(data_path, horizon=None, split=True, pad=False, use_static_f
 
     # Get sequences
     numeric_columns = df_logs.select_dtypes(include=np.number).columns
-    # scaler = StandardScaler()
-    # df_logs[numeric_columns] = scaler.fit_transform(df_logs[numeric_columns])
     df_logs = df_logs[['msno'] + list(numeric_columns)]
-    
-    # if use_static_fs:
-    #     result_df = pd.DataFrame()
-    #     prof = pd.read_csv(os.path.join(data_path, 'user_static_features.csv'))
-    #     prof = prof.drop(columns=['Unnamed: 0'])
-    #     grouped_df = df_logs.groupby('msno')
-    #     for user_id, group_df in grouped_df:
-    #         prof_row = prof[prof['#id'] == user_id]
-    #         repeated_prof = pd.concat([prof_row] * len(group_df), ignore_index=True)
-    #         concatenated_df = pd.concat([group_df.reset_index(drop=True), repeated_prof], axis=1)
-    #         result_df = pd.concat([result_df, concatenated_df], ignore_index=True)
-    #     df_logs = result_df
-
     seqs = df_logs.groupby('msno').apply(pad_numeric_columns_array, length=horizon)
     seqs = np.stack(seqs, axis=0)
     ts = ts - cs.astype(int)

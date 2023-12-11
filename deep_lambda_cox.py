@@ -200,9 +200,9 @@ class DeepLambdaSA(BaseSA):
 
     def get_train_test(self, test_size=.2):
         if self.config.calculate_tgt_and_mask:
-            data_manager = LazyTimesDataGenerator
-        else:
             data_manager = TimesDataGenerator
+        else:
+            data_manager = LazyTimesDataGenerator
 
         subkey = self._next_rng_key()
         X_train, X_test, y_train, y_test, hws_train, hws_test, \
@@ -235,7 +235,7 @@ class DeepLambdaSA(BaseSA):
         iter_range = range(self.config.num_epochs)
         if self.config.verbose:
             iter_range = tqdm(iter_range)
-            
+
         for epoch in iter_range:
             for batch in train_gen:
                 if self.calculate_tgt_and_mask_at_epoch:

@@ -50,9 +50,9 @@ class SA(BaseSA):
 
     def get_train_test(self, test_size=.2):
         if self.config.calculate_tgt_and_mask:
-            data_manager = LazyTimesDataGenerator
-        else:
             data_manager = TgtMskDataGenerator
+        else:
+            data_manager = LazyTimesDataGenerator
 
         subkey = self._next_rng_key()
         X_train, X_test, y_train, y_test, m_train, m_test, _, _, \

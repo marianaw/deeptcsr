@@ -258,7 +258,15 @@ class BaseSA:
         # Test loss
         epoch_loss = 0.0
         count = 0
-        for X, y, m in test_gen:
+        for batch in test_gen:
+            if self.calculate_tgt_and_mask_at_epoch:
+                X, ts, cs = batch
+                
+                # hard target and weights calculation:
+                y, m, _ = get_targets_and_masks(X, ts, cs, self.config.landmark)
+            else:
+                X, y, m = batch 
+
             X, y, m = convert_to_jax_arrays(X, y, m)
 
             # Get validation and test stats

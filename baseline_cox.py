@@ -82,7 +82,7 @@ class SA(BaseSA):
         test_loss = []
 
         if train_gen is None:
-            train_gen, test_gen = self.get_train_test()
+            train_gen, _ = self.get_train_test()
 
         iter_range = range(self.config.num_epochs)
         if self.config.verbose:

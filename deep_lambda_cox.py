@@ -142,7 +142,6 @@ class DeepLambdaSA(BaseSA):
             return h
 
         self.get_targets = jax.jit(get_targets)
-        # self.get_targets = get_targets
 
         def get_weights(s_ws, ys, cs, h_ws):
             w = _get_weights(s_ws, h_ws, ys, cs,
@@ -150,7 +149,6 @@ class DeepLambdaSA(BaseSA):
             return w
 
         self.get_weights = jax.jit(get_weights)
-        # self.get_weights = get_weights
 
         # Losses
         def loss_fn(onl_params, inputs, targets, ws, mask):
@@ -196,7 +194,6 @@ class DeepLambdaSA(BaseSA):
             return model_state, loss
 
         self.update = jax.jit(update)
-        # self.update = update
 
     def get_train_test(self, test_size=.2):
         if self.config.calculate_tgt_and_mask:

@@ -112,8 +112,8 @@ def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
 def get_churn_kkbox(data_path, horizon=None, split=True, pad=False, use_static_fs=False):
     df_logs = pd.read_feather(os.path.join(data_path, 'logs_filtered_preprocessed.feather'))
     df_events = pd.read_feather(os.path.join(data_path, 'survival_preprocessed.feather'))
-    ts = df_events.time
-    cs = df_events.event
+    ts = df_events.time.values
+    cs = df_events.event.values
     horizon = np.max(ts) if horizon is None else horizon
     
     def pad_numeric_columns_array(group, length, padding_value=0):

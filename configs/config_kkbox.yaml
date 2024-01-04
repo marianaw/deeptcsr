@@ -1,5 +1,5 @@
 dataset_name: churn_kkbox
-batch_size: 128
+batch_size: 64
 learning_rate: .01
 log_interval: 1000
 weight_decay: 1.e-10
@@ -20,15 +20,15 @@ arch:
 output_file: /home/mvargas/code/Huawei/Results/{}/
 
 preprocessed_data: False
-calculate_tgt_and_mask: False
+calculate_tgt_and_mask: True
 dataset_kwargs:
   horizon: 45
-  # data_path: /home/mvargas/code/Huawei/SurvanData/kkbox-churn-prediction-challenge/kkbox
-  data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/kkbox-churn-prediction-challenge/kkbox/chunk
+  data_path: /home/mvargas/code/Huawei/SurvanData/kkbox-churn-prediction-challenge/kkbox/chunk
+  # data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/kkbox-churn-prediction-challenge/kkbox/chunk
   use_static_fs: True
   # data_path: /Users/mariana/Documents/projects/Huawei/cloudproject/data/Delays/new_data_b03-09_online/
   # data_path: /home/mvargas/code/Huawei/cloudproject/data/Delays/new_data_b03-09_online/splits_1
 
 lambda_: 0.9
 num_steps: 5
-verbose: False
+verbose: True

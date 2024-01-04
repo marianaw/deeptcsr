@@ -334,13 +334,13 @@ class BaseSA:
     @property
     def output_path(self):
         if self.config.output_file is not None:
-            ext = f'seed_{self.seed}'
-            path = os.path.join(self.config.output_file,
-                                ext)
+            path = self.config.output_file
             if self.config.dataset_name == 'single_task':
                 task_id = self.config.dataset_kwargs['task_id']
                 path = os.path.join(path, f'taskid_{task_id}')
 
+            ext = f'seed_{self.seed}'
+            path = os.path.join(path, ext)            
             if not os.path.exists(path):
                 os.makedirs(path)
         else:

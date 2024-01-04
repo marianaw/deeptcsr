@@ -8,13 +8,13 @@ axis: 2
 landmark: True
 target_lr: .1
 arch:
-  type: linear
+  type: transformer
   arch_kwargs:
-    hidden_size: 64
+    hidden_size: 16
     seq_len: 100  # Has to be the same as the horizon
-    output_dim: 16
-    num_layers: 3
-    dropout: 0.2
+    output_dim: 8
+    num_layers: 1
+    dropout: 0.05
 
     # # For TCN architecture
     # num_inputs: 39

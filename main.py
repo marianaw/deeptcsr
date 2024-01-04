@@ -38,9 +38,6 @@ if __name__ == '__main__':
     type_agent = args.agent
 
     #Model parameters
-    output_file = config['output_file'].format(args.agent)
-    config['output_file'] = output_file
-
     if args.taskid is not None:
         config['dataset_kwargs']['task_id'] = args.taskid
 
@@ -49,6 +46,13 @@ if __name__ == '__main__':
     
     if args.landmark is not None:
         config['landmark'] = bool(args.landmark)
+
+    output_file = config['output_file'].format(args.agent)
+    output_file = os.path.join(output_file, 
+                               config['dataset_name'],
+                               'lambda_{}'.format(config['lambda_']),
+                               'landmark_{}'.format(config['landmark']))
+    config['output_file'] = output_file
     
     if type_agent == "SA":
         agent = SA(config, seed)

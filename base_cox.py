@@ -115,13 +115,13 @@ class BaseSA:
                 out = jnp.transpose(out, axes=(0, 2, 1))
                 out = hk.Linear(self.horizon)(out)
                 return out
-        
+
         elif arch_type == 'transformer':
             def forward_fn(x):
                 ts_transformer = TSTransformer(**arch_kwargs)
                 x = ts_transformer(x)
                 x = hk.Linear(self.horizon)(x)
-                return x 
+                return x
 
         elif arch_type == 'linear':
             dim = seqs.shape[-1]
@@ -131,9 +131,10 @@ class BaseSA:
                 cox = CoxLinearModel(dim, H, axis=self.config.axis)
                 out = cox(x)
                 return out
-            
+
         else:
-            raise Exception('Backbone not understood, should be transfomer, linear, or tcn.')
+            raise Exception(
+                'Backbone not understood, should be transfomer, linear, or tcn.')
 
         _some_input = jnp.array(self.data['seqs'][:2])
         _key = self._next_rng_key()
@@ -218,7 +219,7 @@ class BaseSA:
         if len(surv.shape) == 2:
             scores = median(surv)
         else:
-            scores = median(surv[:,0])
+            scores = median(surv[:, 0])
         return scores
         # backbone_params = {
         #     key: value for key, value in self.state.params.items() if 'tcn_scores' in key}
@@ -234,14 +235,15 @@ class BaseSA:
         for batch in train_gen:
             if self.calculate_tgt_and_mask_at_epoch:
                 X, ts, cs = batch
-                
+
                 # hard target and weights calculation:
-                y, m, _ = get_targets_and_masks(X, ts, cs, self.config.landmark)
+                y, m, _ = get_targets_and_masks(
+                    X, ts, cs, self.config.landmark)
             else:
-                X, y, m = batch 
+                X, y, m = batch
 
             X, y, m = convert_to_jax_arrays(X, y, m)
-            
+
             self.state, loss = self.update(
                 self.state,
                 X,
@@ -262,11 +264,12 @@ class BaseSA:
         for batch in test_gen:
             if self.calculate_tgt_and_mask_at_epoch:
                 X, ts, cs = batch
-                
+
                 # hard target and weights calculation:
-                y, m, _ = get_targets_and_masks(X, ts, cs, self.config.landmark)
+                y, m, _ = get_targets_and_masks(
+                    X, ts, cs, self.config.landmark)
             else:
-                X, y, m = batch 
+                X, y, m = batch
 
             X, y, m = convert_to_jax_arrays(X, y, m)
 
@@ -327,18 +330,16 @@ class BaseSA:
         t_max = jnp.max(ts)
         hs = jnp.arange(1, t_max+1)
         return jnp.sum(f(hs) / (t_max * len(ts)))
-    
+
     @property
     def output_path(self):
         if self.config.output_file is not None:
             ext = f'seed_{self.seed}'
+            path = os.path.join(self.config.output_file,
+                                ext)
             if self.config.dataset_name == 'single_task':
                 task_id = self.config.dataset_kwargs['task_id']
-                ext = ext + f'_taskid_{task_id}'
-
-            path = os.path.join(self.config.output_file,
-                                       self.config.dataset_name,
-                                       ext)
+                path = os.path.join(path, f'taskid_{task_id}')
 
             if not os.path.exists(path):
                 os.makedirs(path)
@@ -353,7 +354,7 @@ class BaseSA:
         cs = test_gen.cs
 
         surv = self.survival_curve(seqs)
-        bs = self.integrated_brier_score(surv[:,0], ts, cs)
+        bs = self.integrated_brier_score(surv[:, 0], ts, cs)
         scores = self.scores(seqs, q=0.0)
         ci = concordance_index(scores, ts, cs)
 

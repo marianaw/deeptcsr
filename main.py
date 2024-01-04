@@ -24,6 +24,11 @@ if __name__ == '__main__':
     parser.add_argument('--agent', type=str, default='SA',
                         help='SA or LambdaSA or DeepLambdaSA')
     parser.add_argument('--seed', help='Experiment seed', type=int, default=42)
+
+    # Overwrites some entries in config
+    parser.add_argument('--taskid', help='Task id', type=int, default=None)
+    parser.add_argument('--lambda_', help='Lambda', type=float, default=None)
+    parser.add_argument('--landmark', help='Landmarking', type=int, default=None)
     args = parser.parse_args()
 
     config_path = args.config
@@ -33,8 +38,17 @@ if __name__ == '__main__':
     type_agent = args.agent
 
     #Model parameters
-    output_file = config['output_file'].format(exp_name)
+    output_file = config['output_file'].format(args.agent)
     config['output_file'] = output_file
+
+    if args.taskid is not None:
+        config['dataset_kwargs']['task_id'] = args.taskid
+
+    if args.lambda_ is not None:
+        config['lambda_'] = args.lambda_
+    
+    if args.landmark is not None:
+        config['landmark'] = bool(args.landmark)
     
     if type_agent == "SA":
         agent = SA(config, seed)
@@ -46,8 +60,10 @@ if __name__ == '__main__':
         raise Exception('Agent type not found')
 
     try:
-        agent.train()
+        train_gen, test_gen = agent.get_train_test()
+        agent.train(train_gen)
         agent.save()
+        agent.eval(test_gen)
         config_path = os.path.join(output_file, 'config.yaml')
         with open(config_path, 'w') as outfile:
             yaml.dump(config, outfile, default_flow_style=False)

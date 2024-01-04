@@ -16,15 +16,8 @@ arch:
     num_layers: 1
     dropout: 0.05
 
-    # # For TCN architecture
-    # num_inputs: 39
-    # num_channels: [32, 16, 8]
-    # kernel_size: 3
-    # dilation_factor: 2
-    # name: tcn_scores
-
 preprocessed_data: False
-output_file: /Users/mariana/Documents/projects/Huawei/Results
+output_file: /Users/mariana/Documents/projects/Huawei/Results/{}/
 # output_file: /home/mvargas/code/Huawei/Results/{}/
 dataset_kwargs:
   horizon: 100
@@ -34,4 +27,4 @@ dataset_kwargs:
 
 lambda_: 0.9
 num_steps: 5
-verbose: False
+verbose: True

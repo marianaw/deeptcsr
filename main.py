@@ -52,6 +52,7 @@ if __name__ == '__main__':
     output_file = config['output_file'].format(args.agent)
     output_file = os.path.join(output_file, 
                                config['dataset_name'],
+                               config['arch']['type'],
                                'lambda_{}'.format(config['lambda_']),
                                'landmark_{}'.format(config['landmark']))
     config['output_file'] = output_file

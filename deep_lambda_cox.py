@@ -47,14 +47,14 @@ def _get_targets(b_tgt, h_tgt, lambda_, T, b_size):
         next_b_tgt, next_h = carry
         h_tgt, b_tgt = h
 
-        h = lambda_ * next_h + (1-lambda_) * next_b_tgt
-        h = jnp.roll(h, 1)
-        h = h.at[:, 0].set(h_tgt[:, 0])
+        h_out = lambda_ * next_h + (1-lambda_) * next_b_tgt
+        h_out = jnp.roll(h_out, 1)
+        h_out = h_out.at[:, 0].set(h_tgt[:, 0])
         cond = h_tgt[:, 0] == 1
-        h = jnp.where(cond[:, None], jnp.zeros((b_size, T)).at[:, 0].set(1), h)
-
-        carry = (b_tgt, h)
-        return carry, h
+        h_out = jnp.where(cond[:, None], jnp.zeros((b_size, T)).at[:, 0].set(1), h_out)
+        
+        carry = (b_tgt, h_out)
+        return carry, h_out
 
     h_aux = jnp.transpose(h_tgt, (1, 0, 2))
     s_aux = jnp.transpose(b_tgt, (1, 0, 2))
@@ -77,9 +77,9 @@ def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, b_size):
         h_tgt, h_wgt, s_wgt = h
 
         h = lambda_ * next_h + (1-lambda_) * next_s_wgt
-        # value = jnp.where(c[:, None], 1.0, h_wgt[:, 0].astype(jnp.float32))
-        aux = jnp.ones_like(h_wgt[:, 0]).astype(jnp.float32)
+        aux = jnp.ones_like(h_wgt[:, 0], dtype=jnp.float32)
         value = jax.lax.select(c, aux,  h_wgt[:, 0].astype(jnp.float32))
+        # value = jnp.where(c, aux, h_wgt[:, 0].astype(jnp.float32))
         h = jnp.roll(h, 1)
         h = h.at[:, 0].set(value)
 
@@ -87,6 +87,7 @@ def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, b_size):
         h = jnp.where(cond[:, None], jnp.zeros((b_size, T)).at[:, 0].set(1), h)
 
         carry = (s_wgt, h)
+
         return carry, h
 
     y_aux = jnp.transpose(h_tgt, (1, 0, 2))
@@ -97,12 +98,6 @@ def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, b_size):
 
     out = jnp.transpose(out, (1, 0, 2))
     return out
-
-
-# def get_mapped_f_factory(f, lambda_, T, in_axis):
-#     single_f = partial(f, lambda_=lambda_, T=T)
-#     batched_f = jax.vmap(single_f, in_axes=in_axis)
-#     return batched_f
 
 
 class DeepLambdaSA(BaseSA):
@@ -142,6 +137,7 @@ class DeepLambdaSA(BaseSA):
             return h
 
         self.get_targets = jax.jit(get_targets)
+        # self.get_targets = get_targets
 
         def get_weights(s_ws, ys, cs, h_ws):
             w = _get_weights(s_ws, h_ws, ys, cs,
@@ -149,6 +145,7 @@ class DeepLambdaSA(BaseSA):
             return w
 
         self.get_weights = jax.jit(get_weights)
+        # self.get_weights = get_weights
 
         # Losses
         def loss_fn(onl_params, inputs, targets, ws, mask):
@@ -255,6 +252,8 @@ class DeepLambdaSA(BaseSA):
 
                 h = self.get_targets(tgt_logits, ys)
                 ws = self.get_weights(s_ws, ys, cs, h_ws)
+                # h = ys
+                # ws = s_ws
 
                 self.state, loss = self.update(
                     self.state,

@@ -24,6 +24,7 @@ if __name__ == '__main__':
     parser.add_argument('--agent', type=str, default='SA',
                         help='SA or LambdaSA or DeepLambdaSA')
     parser.add_argument('--seed', help='Experiment seed', type=int, default=42)
+    parser.add_argument('--size', help='Test set ratio', type=float, default=.2)
 
     # Overwrites some entries in config
     parser.add_argument('--taskid', help='Task id', type=int, default=None)
@@ -36,6 +37,7 @@ if __name__ == '__main__':
     exp_name = args.exp_name
     seed = args.seed
     type_agent = args.agent
+    size = args.size
 
     #Model parameters
     if args.taskid is not None:
@@ -64,7 +66,7 @@ if __name__ == '__main__':
         raise Exception('Agent type not found')
 
     try:
-        train_gen, test_gen = agent.get_train_test()
+        train_gen, test_gen = agent.get_train_test(test_size=size)
         agent.train(train_gen)
         agent.save()
         agent.eval(test_gen)

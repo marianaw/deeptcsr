@@ -1,6 +1,6 @@
 dataset_name: aids
 axis: 2  # For lambda baseline this has to be 1.
-batch_size: 128
+batch_size: 1
 learning_rate: .01
 log_interval: 1000
 weight_decay: 1.e-4
@@ -20,9 +20,9 @@ arch:
 preprocessed_data: False
 dataset_kwargs:
   horizon: 5
-  # data_path: /home/mvargas/code/Huawei/Data/aids-seqs.pkl
-  data_path: /Users/mariana/Documents/projects/Huawei/tdsurv/data/aids-seqs.pkl
+  data_path: /home/mvargas/code/Huawei/Data/aids-seqs.pkl
+  # data_path: /Users/mariana/Documents/projects/Huawei/tdsurv/data/aids-seqs.pkl
 
 lambda_: 0.1
 num_steps: 5
-verbose: False
+verbose: True

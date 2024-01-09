@@ -1,6 +1,7 @@
 from functools import partial
 from dataclasses import dataclass
 import inspect
+import json
 import os
 import pickle
 import chex
@@ -10,7 +11,7 @@ import haiku as hk
 import optax
 
 from networks import TCN, CoxLinearModel, TSTransformer, get_update_and_apply
-from utils import convert_to_jax_arrays, get_data, kaplan_meier, load_preprocessed_dataset
+from utils import concordance_index, convert_to_jax_arrays, get_data, get_targets_and_masks, kaplan_meier, load_preprocessed_dataset
 
 
 Params = chex.ArrayTree
@@ -33,6 +34,8 @@ class ConfigParams:
     axis: int
     arch: dict
     preprocessed_data: bool
+    verbose: bool
+    calculate_tgt_and_mask: bool = True
     landmark: bool = False
     output_file: str = None
     # horizon: int
@@ -71,6 +74,7 @@ class BaseSA:
         self.config = ConfigParams.from_dict(config_kwargs)
         H = self.config.dataset_kwargs['horizon']
         self.horizon = H
+        self.calculate_tgt_and_mask_at_epoch = not self.config.calculate_tgt_and_mask
 
         # Random key
         self.seed = seed
@@ -84,7 +88,10 @@ class BaseSA:
         else:
             seqs, ts, cs, h_tgt, h_ws, mask = get_data(self.config.dataset_name,
                                                        self.config.landmark,
+                                                       self.config.calculate_tgt_and_mask,
                                                        self.config.dataset_kwargs)
+            seqs = seqs.astype(float)
+
         self.data = {'seqs': seqs,
                      'ts': ts,
                      'cs': cs,
@@ -108,13 +115,13 @@ class BaseSA:
                 out = jnp.transpose(out, axes=(0, 2, 1))
                 out = hk.Linear(self.horizon)(out)
                 return out
-        
+
         elif arch_type == 'transformer':
             def forward_fn(x):
                 ts_transformer = TSTransformer(**arch_kwargs)
                 x = ts_transformer(x)
                 x = hk.Linear(self.horizon)(x)
-                return x 
+                return x
 
         elif arch_type == 'linear':
             dim = seqs.shape[-1]
@@ -124,9 +131,10 @@ class BaseSA:
                 cox = CoxLinearModel(dim, H, axis=self.config.axis)
                 out = cox(x)
                 return out
-            
+
         else:
-            raise Exception('Backbone not understood, should be transfomer, linear, or tcn.')
+            raise Exception(
+                'Backbone not understood, should be transfomer, linear, or tcn.')
 
         _some_input = jnp.array(self.data['seqs'][:2])
         _key = self._next_rng_key()
@@ -211,7 +219,7 @@ class BaseSA:
         if len(surv.shape) == 2:
             scores = median(surv)
         else:
-            scores = median(surv[:,0])
+            scores = median(surv[:, 0])
         return scores
         # backbone_params = {
         #     key: value for key, value in self.state.params.items() if 'tcn_scores' in key}
@@ -224,10 +232,18 @@ class BaseSA:
         epoch_loss = 0.0
         count = 0
 
-        for X, y, m in train_gen:
+        for batch in train_gen:
+            if self.calculate_tgt_and_mask_at_epoch:
+                X, ts, cs = batch
+
+                # hard target and weights calculation:
+                y, m, _ = get_targets_and_masks(
+                    X, ts, cs, self.config.landmark)
+            else:
+                X, y, m = batch
 
             X, y, m = convert_to_jax_arrays(X, y, m)
-            
+
             self.state, loss = self.update(
                 self.state,
                 X,
@@ -245,7 +261,16 @@ class BaseSA:
         # Test loss
         epoch_loss = 0.0
         count = 0
-        for X, y, m in test_gen:
+        for batch in test_gen:
+            if self.calculate_tgt_and_mask_at_epoch:
+                X, ts, cs = batch
+
+                # hard target and weights calculation:
+                y, m, _ = get_targets_and_masks(
+                    X, ts, cs, self.config.landmark)
+            else:
+                X, y, m = batch
+
             X, y, m = convert_to_jax_arrays(X, y, m)
 
             # Get validation and test stats
@@ -306,36 +331,47 @@ class BaseSA:
         hs = jnp.arange(1, t_max+1)
         return jnp.sum(f(hs) / (t_max * len(ts)))
 
-    def old_integrated_brier_score(self, xs, ts, cs):
-        """Compute the integrated Brier score."""
-        cs = cs.astype(jnp.bool_)
-        surv = self.survival_curve(xs)
-        ws = kaplan_meier(ts - ~cs, ~cs)
-        t_max = jnp.max(ts)
-        tot = 0.0
-        for h in range(1, t_max + 1):
-            # Sequences that terminated.
-            idx = (ts <= h) & ~cs
-            tot += jnp.sum((1 / ws[ts[idx] - 1]) *
-                           (0.0 - surv[idx, h - 1]) ** 2)
-            # Sequences that are still active.
-            idx = (ts > h) | ((ts == h) & cs)
-            tot += jnp.sum((1 / ws[h - 1]) * (1.0 - surv[idx, h - 1]) ** 2)
-        return tot / (t_max * len(ts))
-
-    def save(self):
+    @property
+    def output_path(self):
         if self.config.output_file is not None:
-            ext = f'seed_{self.seed}'
+            path = self.config.output_file
             if self.config.dataset_name == 'single_task':
                 task_id = self.config.dataset_kwargs['task_id']
-                ext = ext + f'_taskid_{task_id}'
+                path = os.path.join(path, f'taskid_{task_id}')
 
-            output_path = os.path.join(self.config.output_file,
-                                       self.config.dataset_name,
-                                       ext)
+            ext = f'seed_{self.seed}'
+            path = os.path.join(path, ext)            
+            if not os.path.exists(path):
+                os.makedirs(path)
+        else:
+            path = None
 
-            if not os.path.exists(output_path):
-                os.makedirs(output_path)
+        return path
+
+    def eval(self, test_gen):
+        seqs = test_gen.X
+        ts = test_gen.ts
+        cs = test_gen.cs
+
+        surv = self.survival_curve(seqs)
+        bs = self.integrated_brier_score(surv[:, 0], ts, cs)
+        scores = self.scores(seqs, q=0.0)
+        ci = concordance_index(scores, ts, cs)
+
+        output_path = self.output_path
+        if output_path is not None:
+            ci = ci.item()
+            bs = bs.item()
+            path_result = os.path.join(output_path, 'results.json')
+            data = {'ci': ci, 'bs': bs}
+            with open(path_result, 'w') as json_file:
+                json.dump(data, json_file)
+
+        return bs, ci
+
+    def save(self):
+        output_path = self.output_path
+        if output_path is not None:
             path_model = os.path.join(output_path, 'model.pt')
             path_state = os.path.join(output_path, 'state.pt')
             pickle.dump(self.state.params, open(path_model, 'wb'))

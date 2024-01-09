@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from base_cox import BaseSA, ConfigParams, Params
-from utils import TimesDataGenerator, convert_to_jax_arrays, train_test_split
+from utils import LazyTimesDataGenerator, TimesDataGenerator, convert_to_jax_arrays, get_targets_and_masks, train_test_split
 from dataclasses import dataclass
 from tqdm import tqdm
 
@@ -26,6 +26,8 @@ class Config(ConfigParams):
     target_lr: float = .0001
 
 # Model state
+
+
 @chex.dataclass(frozen=True)
 class ModelState:
     """A structure of the current model state"""
@@ -45,15 +47,15 @@ def _get_targets(b_tgt, h_tgt, lambda_, T, b_size):
         next_b_tgt, next_h = carry
         h_tgt, b_tgt = h
 
-        h = lambda_ * next_h + (1-lambda_) * next_b_tgt
-        h = jnp.roll(h, 1)
-        h = h.at[:, 0].set(h_tgt[:, 0])
+        h_out = lambda_ * next_h + (1-lambda_) * next_b_tgt
+        h_out = jnp.roll(h_out, 1)
+        h_out = h_out.at[:, 0].set(h_tgt[:, 0])
         cond = h_tgt[:, 0] == 1
-        h = jnp.where(cond[:, None], jnp.zeros((b_size, T)).at[:, 0].set(1), h)
+        h_out = jnp.where(cond[:, None], jnp.zeros((b_size, T)).at[:, 0].set(1), h_out)
+        
+        carry = (b_tgt, h_out)
+        return carry, h_out
 
-        carry = (b_tgt, h)
-        return carry, h
-    
     h_aux = jnp.transpose(h_tgt, (1, 0, 2))
     s_aux = jnp.transpose(b_tgt, (1, 0, 2))
     _, out = jax.lax.scan(f, carry_init, (h_aux, s_aux), reverse=True)
@@ -69,15 +71,15 @@ def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, b_size):
 
     w_init = jnp.where(c[:, None], jnp.ones((b_size, T)), w_init)
     carry_init = (s_wgt[:, T-1], w_init)
-    
+
     def f(carry, h):
         next_s_wgt, next_h = carry
         h_tgt, h_wgt, s_wgt = h
 
         h = lambda_ * next_h + (1-lambda_) * next_s_wgt
-        # value = jnp.where(c[:, None], 1.0, h_wgt[:, 0].astype(jnp.float32))
-        aux = jnp.ones_like(h_wgt[:, 0]).astype(jnp.float32)
+        aux = jnp.ones_like(h_wgt[:, 0], dtype=jnp.float32)
         value = jax.lax.select(c, aux,  h_wgt[:, 0].astype(jnp.float32))
+        # value = jnp.where(c, aux, h_wgt[:, 0].astype(jnp.float32))
         h = jnp.roll(h, 1)
         h = h.at[:, 0].set(value)
 
@@ -85,8 +87,9 @@ def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, b_size):
         h = jnp.where(cond[:, None], jnp.zeros((b_size, T)).at[:, 0].set(1), h)
 
         carry = (s_wgt, h)
+
         return carry, h
-    
+
     y_aux = jnp.transpose(h_tgt, (1, 0, 2))
     h_aux = jnp.transpose(h_wgt, (1, 0, 2))
     s_aux = jnp.transpose(s_wgt, (1, 0, 2))
@@ -95,12 +98,6 @@ def _get_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, b_size):
 
     out = jnp.transpose(out, (1, 0, 2))
     return out
-
-
-# def get_mapped_f_factory(f, lambda_, T, in_axis):
-#     single_f = partial(f, lambda_=lambda_, T=T)
-#     batched_f = jax.vmap(single_f, in_axes=in_axis)
-#     return batched_f
 
 
 class DeepLambdaSA(BaseSA):
@@ -135,7 +132,8 @@ class DeepLambdaSA(BaseSA):
 
         def get_targets(tgt_logits, ys):
             s_tgt = jax.nn.sigmoid(tgt_logits)
-            h = _get_targets(s_tgt, ys, self.lambda_, self.horizon, self.config.batch_size)
+            h = _get_targets(s_tgt, ys, self.lambda_,
+                             self.horizon, self.config.batch_size)
             return h
 
         self.get_targets = jax.jit(get_targets)
@@ -145,7 +143,7 @@ class DeepLambdaSA(BaseSA):
             w = _get_weights(s_ws, h_ws, ys, cs,
                              self.lambda_, self.horizon, self.config.batch_size)
             return w
-        
+
         self.get_weights = jax.jit(get_weights)
         # self.get_weights = get_weights
 
@@ -193,11 +191,15 @@ class DeepLambdaSA(BaseSA):
             return model_state, loss
 
         self.update = jax.jit(update)
-        # self.update = update
 
     def get_train_test(self, test_size=.2):
+        if self.config.calculate_tgt_and_mask:
+            data_manager = TimesDataGenerator
+        else:
+            data_manager = LazyTimesDataGenerator
+
         subkey = self._next_rng_key()
-        X_train, X_test, y_train, y_test, hws_train, hws_test,\
+        X_train, X_test, y_train, y_test, hws_train, hws_test, \
             m_train, m_test, ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
                                                                                      self.data['target'],
                                                                                      self.data['h_ws'],
@@ -207,15 +209,15 @@ class DeepLambdaSA(BaseSA):
                                                                                      seed=self.seed,
                                                                                      test_size=test_size)
         subkey = self._next_rng_key()
-        train_gen = TimesDataGenerator(X=X_train, h_ws=hws_train,
-                                       ts=ts_train, cs=cs_train,
-                                       y=y_train, mask=m_train,
-                                       batch_size=self.config.batch_size, rng=subkey)
+        train_gen = data_manager(X=X_train, h_ws=hws_train,
+                                 ts=ts_train, cs=cs_train,
+                                 y=y_train, mask=m_train,
+                                 batch_size=self.config.batch_size, rng=subkey)
         subkey = self._next_rng_key()
-        test_gen = TimesDataGenerator(X=X_test, h_ws=hws_test,
-                                      ts=ts_test, cs=cs_test,
-                                      y=y_test, mask=m_test,
-                                      batch_size=self.config.batch_size, rng=subkey)
+        test_gen = data_manager(X=X_test, h_ws=hws_test,
+                                ts=ts_test, cs=cs_test,
+                                y=y_test, mask=m_test,
+                                batch_size=self.config.batch_size, rng=subkey)
         return train_gen, test_gen
 
     def train(self, train_gen=None, test_gen=None):
@@ -224,10 +226,22 @@ class DeepLambdaSA(BaseSA):
             train_gen, test_gen = self.get_train_test()
 
         losses = []
-        for epoch in tqdm(range(self.config.num_epochs)):
-            for seqs, _, cs, ys, m, h_ws in train_gen:
-                
-                seqs, cs, ys, m, h_ws = convert_to_jax_arrays(seqs, cs, ys, m, h_ws)
+        iter_range = range(self.config.num_epochs)
+        if self.config.verbose:
+            iter_range = tqdm(iter_range)
+
+        for epoch in iter_range:
+            for batch in train_gen:
+                if self.calculate_tgt_and_mask_at_epoch:
+                    seqs, ts, cs = batch
+                    
+                    # hard target and weights calculation:
+                    ys, h_ws, m = get_targets_and_masks(seqs, ts, cs, self.config.landmark)
+                else:
+                    seqs, _, cs, ys, m, h_ws = batch
+
+                seqs, cs, ys, m, h_ws = convert_to_jax_arrays(
+                    seqs, cs, ys, m, h_ws)
 
                 # Get targets
                 tgt_logits = self.forward(self.state.tgt_params, seqs)
@@ -238,6 +252,8 @@ class DeepLambdaSA(BaseSA):
 
                 h = self.get_targets(tgt_logits, ys)
                 ws = self.get_weights(s_ws, ys, cs, h_ws)
+                # h = ys
+                # ws = s_ws
 
                 self.state, loss = self.update(
                     self.state,

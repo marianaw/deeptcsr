@@ -38,6 +38,7 @@ class ConfigParams:
     calculate_tgt_and_mask: bool = True
     landmark: bool = False
     output_file: str = None
+    ckpt_path: str = None
     # horizon: int
 
     @classmethod
@@ -140,12 +141,18 @@ class BaseSA:
         _key = self._next_rng_key()
         forward = hk.without_apply_rng(hk.transform(forward_fn))
         params = forward.init(_key, _some_input)
+        if self.config.ckpt_path is not None:
+            params_path = os.path.join(self.config.ckpt_path.format(seed), 'model.pt')
+            params = pickle.load(open(params_path, 'rb'))
         self.forward = forward.apply
 
         # Online encoder update
         optimizer = optax.adamw(learning_rate=self.config.learning_rate,
                                 weight_decay=self.config.weight_decay)
         opt_state = optimizer.init(params)
+        if self.config.ckpt_path is not None:
+            state_path = os.path.join(self.config.ckpt_path.format(seed), 'state.pt')
+            opt_state = pickle.load(open(state_path, 'rb'))
         online_enc_update = get_update_and_apply(optimizer)
 
         # State of the model

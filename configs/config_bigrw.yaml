@@ -1,0 +1,29 @@
+dataset_name: big_rw
+axis: 2  # For lambda baseline this has to be 1.
+batch_size: 128
+learning_rate: .1
+log_interval: 1000
+weight_decay: 1.e-10
+num_epochs: 1000
+output_file: /Users/mariana/Documents/projects/Huawei/Results/{}/
+landmark: True
+target_lr: .01
+arch:
+  type: transformer
+  arch_kwargs:
+    hidden_size: 16
+    seq_len: 100  # Has to be the same as the horizon
+    output_dim: 8
+    num_layers: 1
+    dropout: 0.05
+
+preprocessed_data: False
+# ckpt_path: /Users/mariana/Documents/projects/Huawei/Results/SA/big_rw/transformer/lambda_0.0/landmark_False/seed_{}
+dataset_kwargs:
+  horizon: 100
+  # data_path: /home/mvargas/code/Huawei/Data/aids-seqs.pkl
+  data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/bigrw-seqs.pkl
+
+lambda_: 0.0
+num_steps: 5
+verbose: True

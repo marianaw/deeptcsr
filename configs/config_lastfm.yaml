@@ -16,15 +16,15 @@ arch:
     num_layers: 1
     dropout: 0.05
 
-# output_file: /Users/mariana/Documents/projects/Huawei/Results/{}/
-output_file: /home/mvargas/code/Huawei/Results/{}/
+output_file: /Users/mariana/Documents/projects/Huawei/Results/{}/
+# output_file: /home/mvargas/code/Huawei/Results/{}/
 
 preprocessed_data: False
 calculate_tgt_and_mask: True
 dataset_kwargs:
   horizon: 53
-  # data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/lastfm-dataset-1K
-  data_path: /home/mvargas/code/Huawei/SurvanData/lastfm-dataset-1K
+  data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/lastfm-dataset-1K
+  # data_path: /home/mvargas/code/Huawei/SurvanData/lastfm-dataset-1K
   use_static_fs: False
 
 lambda_: 0.9

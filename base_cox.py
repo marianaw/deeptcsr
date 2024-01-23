@@ -9,6 +9,7 @@ import jax
 import jax.numpy as jnp
 import haiku as hk
 import optax
+import numpy as np
 
 from networks import TCN, CoxLinearModel, TSTransformer, get_update_and_apply
 from utils import concordance_index, convert_to_jax_arrays, get_data, get_targets_and_masks, kaplan_meier, load_preprocessed_dataset
@@ -91,7 +92,7 @@ class BaseSA:
                                                        self.config.landmark,
                                                        self.config.calculate_tgt_and_mask,
                                                        self.config.dataset_kwargs)
-            seqs = seqs.astype(float)
+            seqs = seqs.astype(np.float32)
 
         self.data = {'seqs': seqs,
                      'ts': ts,

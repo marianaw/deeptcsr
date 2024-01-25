@@ -25,7 +25,6 @@ dataset_kwargs:
   horizon: 100
   # data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/lastfm-dataset-1K
   data_path: /home/mvargas/code/Huawei/SurvanData/lastfm-dataset-1K
-  use_static_fs: False
 
 lambda_: 0.9
 num_steps: 5

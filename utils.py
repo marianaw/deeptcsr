@@ -91,6 +91,9 @@ def pad_sequences(seqs, max_length):
 
 def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
     loaders = {'aids': get_data_baseline,
+               'pbc2': get_data_baseline,
+               'placeholder': get_placeholder,
+               'big_rw': get_data_baseline,
                'single_task': get_single_task_dataset,
                'mixed_tasks': get_mixed_task_dataset,
                'churn_lastfm_months': get_churn_lastfm_dataset_months,
@@ -110,22 +113,36 @@ def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
 
 
 def get_churn_kkbox(data_path, horizon=None, split=True, pad=False, use_static_fs=False):
-    df_logs = pd.read_feather(os.path.join(data_path, 'logs_filtered_preprocessed.feather'))
-    df_events = pd.read_feather(os.path.join(data_path, 'survival_preprocessed.feather'))
+    df_logs_orig = pd.read_feather(os.path.join(
+        data_path, 'logs_filtered_preprocessed.feather'))
+
+    # Center and scale
+    scaler = StandardScaler()
+    cols = ['num_25', 'num_50',	'num_75', 'num_985',
+            'num_100', 'num_unq', 'log_minutes']
+    df_logs = pd.DataFrame(scaler.fit_transform(df_logs_orig[cols]), columns=cols)
+    df_logs['msno'] = df_logs_orig.msno.values
+
+    assert len(df_logs_orig) == len(df_logs)
+
+    df_events = pd.read_feather(os.path.join(
+        data_path, 'survival_preprocessed.feather'))
     ts = df_events.time.values
     cs = df_events.event.values
     horizon = np.max(ts) if horizon is None else horizon
-    
+
     def pad_numeric_columns_array(group, length, padding_value=0):
         numeric_values = group.select_dtypes(include=np.number).values
         pad_width = max(0, length - len(group))
-        padded_values = np.pad(numeric_values, ((0, pad_width), (0, 0)), constant_values=padding_value)
+        padded_values = np.pad(
+            numeric_values, ((0, pad_width), (0, 0)), constant_values=padding_value)
         return padded_values
 
     # Get sequences
     numeric_columns = df_logs.select_dtypes(include=np.number).columns
     df_logs = df_logs[['msno'] + list(numeric_columns)]
-    seqs = df_logs.groupby('msno').apply(pad_numeric_columns_array, length=horizon)
+    seqs = df_logs.groupby('msno').apply(
+        pad_numeric_columns_array, length=horizon)
     seqs = np.stack(seqs, axis=0)
     ts = ts - cs.astype(int)
     return seqs, ts, cs
@@ -138,11 +155,12 @@ def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=Fal
     ts = df_events.time.values
     horizon = np.max(ts) if horizon is None else horizon
     cs = df_events.censored.values.astype(bool)
-    
+
     def pad_numeric_columns_array(group, length, padding_value=0):
         numeric_values = group.select_dtypes(include=np.number).values
         pad_width = max(0, length - len(group))
-        padded_values = np.pad(numeric_values, ((0, pad_width), (0, 0)), constant_values=padding_value)
+        padded_values = np.pad(
+            numeric_values, ((0, pad_width), (0, 0)), constant_values=padding_value)
         return padded_values
 
     # Get sequences
@@ -150,7 +168,7 @@ def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=Fal
     # scaler = StandardScaler()
     # df_logs[numeric_columns] = scaler.fit_transform(df_logs[numeric_columns])
     df_logs = df_logs[['userid'] + list(numeric_columns)]
-    
+
     if use_static_fs:
         result_df = pd.DataFrame()
         prof = pd.read_csv(os.path.join(data_path, 'user_static_features.csv'))
@@ -158,12 +176,16 @@ def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=Fal
         grouped_df = df_logs.groupby('userid')
         for user_id, group_df in grouped_df:
             prof_row = prof[prof['#id'] == user_id]
-            repeated_prof = pd.concat([prof_row] * len(group_df), ignore_index=True)
-            concatenated_df = pd.concat([group_df.reset_index(drop=True), repeated_prof], axis=1)
-            result_df = pd.concat([result_df, concatenated_df], ignore_index=True)
+            repeated_prof = pd.concat(
+                [prof_row] * len(group_df), ignore_index=True)
+            concatenated_df = pd.concat(
+                [group_df.reset_index(drop=True), repeated_prof], axis=1)
+            result_df = pd.concat(
+                [result_df, concatenated_df], ignore_index=True)
         df_logs = result_df
 
-    seqs = df_logs.groupby('userid').apply(pad_numeric_columns_array, length=horizon)
+    seqs = df_logs.groupby('userid').apply(
+        pad_numeric_columns_array, length=horizon)
     seqs = np.stack(seqs, axis=0)
     ts = ts - cs.astype(int)
     return seqs, ts, cs
@@ -176,7 +198,7 @@ def get_churn_lastfm_dataset_days(data_path, horizon=None, split=True, pad=False
     ts = df_events.time.values
     horizon = np.max(ts) if horizon is None else horizon
     cs = df_events.censored.values
-    
+
     # Get sequences
     numeric_columns = df_logs.select_dtypes(include=np.number).columns
     df_logs = df_logs[['userid'] + list(numeric_columns)]
@@ -341,6 +363,13 @@ def get_data_baseline(data_path, horizon=None):
     return seqs, ts, cs
 
 
+def get_placeholder(dim, horizon, data_path=None):
+    seqs = np.zeros((1, horizon, dim)).astype(np.float32)
+    ts = np.zeros(1).astype(int)
+    cs = np.zeros(1).astype(bool)
+    return seqs, ts, cs
+
+
 def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2):
     # Shuffle the indices of the data
     num_samples = X.shape[0]
@@ -370,7 +399,7 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2):
         hws_test = h_ws[test_indices]
         m_train = mask[train_indices]
         m_test = mask[test_indices]
-    
+
     else:
         y_train, y_test = None, None
         hws_train, hws_test = None, None
@@ -529,7 +558,7 @@ def unroll(seqs, ts, cs, compress=False):
     cs_ = jnp.copy(cs)
     for i in range(1, jnp.max(ts)):
         idx = ts > i  # Indices of seqs whose successor state is observed.
-        new = jnp.zeros((jnp.sum(idx),) + seqs.shape[1:], dtype=seqs.dtype)
+        new = jnp.zeros((jnp.sum(idx),) + seqs.shape[1:], dtype=jnp.float32)
         new = new.at[:, :-i].set(seqs[idx, i:])
         seqs_ = jnp.concatenate((seqs_, new))
         ts_ = jnp.concatenate((ts_, ts[idx] - i))

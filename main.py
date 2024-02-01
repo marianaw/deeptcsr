@@ -54,9 +54,10 @@ if __name__ == '__main__':
                                config['dataset_name'],
                                config['arch']['type'],
                                'lambda_{}'.format(config['lambda_']),
-                               'landmark_{}'.format(config['landmark']))
+                               'landmark_{}'.format(config['landmark']),
+                               exp_name)
     config['output_file'] = output_file
-    
+
     if type_agent == "SA":
         agent = SA(config, seed)
     elif type_agent == 'LambdaSA':
@@ -67,6 +68,7 @@ if __name__ == '__main__':
         raise Exception('Agent type not found')
 
     try:
+        # import ipdb; ipdb.set_trace()
         train_gen, test_gen = agent.get_train_test(test_size=size)
         agent.train(train_gen)
         agent.save()

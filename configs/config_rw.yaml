@@ -5,9 +5,9 @@ learning_rate: .1
 log_interval: 1000
 weight_decay: 1.e-4
 num_epochs: 100
-output_file: /Users/mariana/Documents/projects/Huawei/Results/{}/
+output_file: /Users/mariana/Documents/col/lts4/survan/Results/{}/
 landmark: True
-target_lr: .5
+target_lr: .01
 arch:
   type: linear
   arch_kwargs:
@@ -22,7 +22,7 @@ dataset_kwargs:
   horizon: 11
   dim: 21
   # data_path: /home/mvargas/code/Huawei/Data/aids-seqs.pkl
-  data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/small/pbc-seqs.pkl
+  data_path: /Users/mariana/Documents/mariana_lts4mac_backup/SurvanData/small/pbc-seqs.pkl
 
 lambda_: 0.0
 num_steps: 5

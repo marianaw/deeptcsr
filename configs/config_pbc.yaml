@@ -21,7 +21,7 @@ preprocessed_data: False
 dataset_kwargs:
   horizon: 16
   # data_path: /home/mvargas/code/Huawei/Data/aids-seqs.pkl
-  data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/small/pbc-seqs.pkl
+  data_path: /Users/mariana/Documents/mariana_lts4mac_backup/SurvanData/small/pbc-seqs.pkl
 
 lambda_: 0.0
 num_steps: 5

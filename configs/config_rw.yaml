@@ -4,7 +4,7 @@ batch_size: 128
 learning_rate: .1
 log_interval: 1000
 weight_decay: 1.e-4
-num_epochs: 100
+num_epochs: 1000
 output_file: /Users/mariana/Documents/col/lts4/survan/Results/{}/
 landmark: True
 target_lr: .01

@@ -22,7 +22,8 @@ preprocessed_data: False
 # ckpt_path: /Users/mariana/Documents/projects/Huawei/Results/SA/big_rw/transformer/lambda_0.0/landmark_False/seed_{}
 dataset_kwargs:
   horizon: 100
-  data_path: /home/mvargas/code/Huawei/SurvanData/bigrw-seqs.pkl
+  # data_path: /home/mvargas/code/Huawei/SurvanData/bigrw-seqs.pkl
+  data_path: /Users/mariana/Documents/mariana_lts4mac_backup/SurvanData/bigrw-seqs.pkl
   # data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/bigrw-seqs.pkl
 
 lambda_: 0.0

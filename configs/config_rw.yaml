@@ -22,7 +22,7 @@ dataset_kwargs:
   horizon: 11
   dim: 21
   # data_path: /home/mvargas/code/Huawei/Data/aids-seqs.pkl
-  data_path: /Users/mariana/Documents/mariana_lts4mac_backup/SurvanData/small/pbc-seqs.pkl
+  data_path: /Users/mariana/Documents/col/lts4/SurvanData/bigrw-seqs.pkl
 
 lambda_: 0.0
 num_steps: 5

@@ -152,3 +152,47 @@ class TSTransformer(hk.Module):
         n = self.seq_len
         mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))
         return mask
+
+
+# TODO: check this works.
+class TSTransformerPosEnc(hk.Module):
+    def __init__(self, hidden_size, seq_len, output_dim, dropout=0.2, num_layers=3, seed=42):
+        super(TSTransformerPosEnc, self).__init__()
+        self.hidden_size = hidden_size
+        self.dropout = dropout
+        self.num_layers = num_layers
+        self.seq_len = seq_len
+        self.output_dim = output_dim
+        self.keys_seq = hk.PRNGSequence(seed)
+
+    def __call__(self, x):
+        # Add positional encoding to the input
+        pos_encoding = self._get_positional_encoding(self.seq_len, self.hidden_size)
+        x = hk.Linear(self.hidden_size)(x) + pos_encoding
+        
+        mask = self._get_mask_future()
+        w_init = hk.initializers.VarianceScaling(2 / self.num_layers)
+        for _ in range(self.num_layers):
+            x = hk.MultiHeadAttention(num_heads=4,
+                                      key_size=16,
+                                      model_size=self.hidden_size,
+                                      w_init=w_init)(x, x, mask)
+            x = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(x)
+            x = hk.Linear(self.hidden_size)(x)
+            x = hk.dropout(next(self.keys_seq), self.dropout, x)
+
+        return x
+
+    def _get_mask_future(self):
+        n = self.seq_len
+        mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))
+        return mask
+
+    def _get_positional_encoding(self, seq_len, hidden_size):
+        """Create a sinusoidal positional encoding matrix."""
+        position = jnp.arange(seq_len)[:, jnp.newaxis]
+        div_term = jnp.exp(jnp.arange(0, hidden_size, 2) * -(jnp.log(10000.0) / hidden_size))
+        pos_encoding = jnp.zeros((seq_len, hidden_size))
+        pos_encoding = pos_encoding.at[:, 0::2].set(jnp.sin(position * div_term))
+        pos_encoding = pos_encoding.at[:, 1::2].set(jnp.cos(position * div_term))
+        return pos_encoding

@@ -5,8 +5,7 @@ learning_rate: .01
 log_interval: 1000
 weight_decay: 1.e-2
 num_epochs: 1000
-# output_file: /Users/mariana/Documents/projects/Huawei/Results/{}/
-output_file: /home/mvargas/code/Huawei/Results/{}/
+output_file: /Users/mariana/Documents/col/lts4/survan/Results/{}/
 landmark: True
 target_lr: .01
 arch:
@@ -22,9 +21,7 @@ preprocessed_data: False
 # ckpt_path: /Users/mariana/Documents/projects/Huawei/Results/SA/big_rw/transformer/lambda_0.0/landmark_False/seed_{}
 dataset_kwargs:
   horizon: 100
-  # data_path: /home/mvargas/code/Huawei/SurvanData/bigrw-seqs.pkl
-  data_path: /Users/mariana/Documents/mariana_lts4mac_backup/SurvanData/bigrw-seqs.pkl
-  # data_path: /Users/mariana/Documents/projects/Huawei/SurvanData/bigrw-seqs.pkl
+  data_path: /Users/mariana/Documents/col/lts4/SurvanData/bigrw-seqs.pkl
 
 lambda_: 0.0
 num_steps: 5

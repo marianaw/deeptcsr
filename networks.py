@@ -123,9 +123,9 @@ class CoxLinearModel(hk.Module):
         )
 
 
-class TSTransformer(hk.Module):
+class TSTransformerNoPos(hk.Module):
     def __init__(self, hidden_size, seq_len, output_dim, dropout=0.2, num_layers=3, seed=42):
-        super(TSTransformer, self).__init__()
+        super(TSTransformerNoPos, self).__init__()
         self.hidden_size = hidden_size
         self.dropout = dropout
         self.num_layers = num_layers
@@ -154,10 +154,9 @@ class TSTransformer(hk.Module):
         return mask
 
 
-# TODO: check this works.
-class TSTransformerPosEnc(hk.Module):
+class TSTransformer(hk.Module):
     def __init__(self, hidden_size, seq_len, output_dim, dropout=0.2, num_layers=3, seed=42):
-        super(TSTransformerPosEnc, self).__init__()
+        super(TSTransformer, self).__init__()
         self.hidden_size = hidden_size
         self.dropout = dropout
         self.num_layers = num_layers
@@ -183,9 +182,15 @@ class TSTransformerPosEnc(hk.Module):
 
         return x
 
+    # def _get_mask_future(self):
+    #     n = self.seq_len
+    #     mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))
+    #     return mask
+    
     def _get_mask_future(self):
         n = self.seq_len
-        mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))
+        mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))  # Lower triangular mask
+        mask = jnp.where(mask == 0, -jnp.inf, 0.0)  # Convert the 0s to -inf, keep 1s as 0
         return mask
 
     def _get_positional_encoding(self, seq_len, hidden_size):

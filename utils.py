@@ -98,8 +98,8 @@ def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
                'mixed_tasks': get_mixed_task_dataset,
                'churn_lastfm_months': get_churn_lastfm_dataset_months,
                'churn_lastfm_days': get_churn_lastfm_dataset_days,
-               'churn_kkbox': get_churn_kkbox}
-
+               'churn_kkbox': get_churn_kkbox,
+               'nasa': get_nasa}
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)
         if calculate_tgt_and_mask:
@@ -110,6 +110,15 @@ def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
         raise Exception('type of dataset not found.')
 
     return seqs, ts, cs, target, h_ws, mask
+
+
+def get_nasa(data_path, horizon=None, split=True, pad=False):
+    with h5py.File(data_path, 'r') as f:
+        seqs = np.array(f['seqs'])
+        ts = np.array(f['ts'])
+        cs = np.array(f['cs'])
+
+    return seqs, ts, cs
 
 
 def get_churn_kkbox(data_path, horizon=None, split=True, pad=False, use_static_fs=False):

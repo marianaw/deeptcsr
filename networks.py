@@ -182,15 +182,9 @@ class TSTransformer(hk.Module):
 
         return x
 
-    # def _get_mask_future(self):
-    #     n = self.seq_len
-    #     mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))
-    #     return mask
-    
     def _get_mask_future(self):
         n = self.seq_len
-        mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))  # Lower triangular mask
-        mask = jnp.where(mask == 0, -jnp.inf, 0.0)  # Convert the 0s to -inf, keep 1s as 0
+        mask = jnp.tril(jnp.ones((n, n), dtype=jnp.float32))
         return mask
 
     def _get_positional_encoding(self, seq_len, hidden_size):

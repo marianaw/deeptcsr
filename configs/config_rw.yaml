@@ -4,18 +4,18 @@ batch_size: 128
 learning_rate: .1
 log_interval: 1000
 weight_decay: 1.e-4
-num_epochs: 1000
+num_epochs: 200
 output_file: /Users/mariana/Documents/col/lts4/survan/Results/{}/
 landmark: True
 target_lr: .01
 arch:
-  type: linear
+  type: transformer
   arch_kwargs:
-    num_inputs: 39
-    num_channels: [64, 32, 16]
-    kernel_size: 3
-    dilation_factor: 2
-    name: tcn_scores
+    hidden_size: 16
+    seq_len: 20  # Has to be the same as the horizon
+    output_dim: 8
+    num_layers: 1
+    dropout: 0.2
 
 preprocessed_data: False
 dataset_kwargs:

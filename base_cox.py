@@ -216,25 +216,19 @@ class BaseSA:
 
     # Scores
     def scores(self, x, q=0.5):
+        def median_time_idx(surv):
+            # k = first index where S <= q; if never crosses, use T
+            T = surv.shape[0]
+            crosses = surv <= q
+            has = jnp.any(crosses)
+            k = jnp.where(has, jnp.argmax(crosses), T).astype(jnp.int32)
+            return k.astype(jnp.float32)
 
-        def median_fn(surv):
-            mask = jnp.where(surv > q, 1, 0)
-            idx = jnp.maximum(0, mask.sum()-1)
-            return surv[idx]
-
-        median = jax.vmap(median_fn)
-        surv = self.survival_curve(x)
-        if len(surv.shape) == 2:
-            scores = median(surv)
+        S = self.survival_curve(x)  # shape (N, T) or (N, ?, T)
+        if S.ndim == 2:
+            return jax.vmap(median_time_idx)(S)
         else:
-            scores = median(surv[:, 0])
-        return scores
-        # backbone_params = {
-        #     key: value for key, value in self.state.params.items() if 'tcn_scores' in key}
-        # beta = self.state.params['cox_linear_model']['beta']
-
-        # out = self.backbone(backbone_params, x)
-        # return -jnp.dot(out, beta)
+            return jax.vmap(median_time_idx)(S[:, 0])
 
     def train_step(self, train_gen):
         epoch_loss = 0.0
@@ -363,7 +357,7 @@ class BaseSA:
 
         surv = self.survival_curve(seqs)
         bs = self.integrated_brier_score(surv[:, 0], ts, cs)
-        scores = self.scores(seqs, q=0.0)
+        scores = self.scores(seqs, q=0.5)
         ci = concordance_index(scores, ts, cs)
 
         output_path = self.output_path

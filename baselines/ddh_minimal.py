@@ -12,6 +12,8 @@ import argparse
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
+import os
+import json
 from typing import Any, Dict
 
 import haiku as hk
@@ -20,6 +22,8 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import yaml
+import sys
+sys.path.append(str(Path('..').resolve()))
 
 from utils import (
     TimesDataGenerator,
@@ -38,14 +42,15 @@ class DDHConfig:
     batch_size: int = 64
     learning_rate: float = 1e-3
     num_epochs: int = 50
-    hidden_size: int = 64
+    hidden_size: int = 128
     test_size: float = 0.2
     axis: int = 2
     seed: int = 0
     log_interval: int = 10
     landmark: bool = False
     ranking_weight: float = 1.0
-    ranking_sigma: float = 0.1
+    ranking_sigma: float = 0.5
+    prediction_weight: float = 0.1
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "DDHConfig":
@@ -59,6 +64,7 @@ class DDHConfig:
         hidden_size = raw.get("ddh_hidden_size", arch_kwargs.get("hidden_size", cls.hidden_size))
         ranking_weight = raw.get("ddh_ranking_weight", cls.ranking_weight)
         ranking_sigma = raw.get("ddh_ranking_sigma", cls.ranking_sigma)
+        prediction_weight = raw.get("ddh_prediction_weight", cls.prediction_weight)
 
         return cls(
             dataset_name=raw["dataset_name"],
@@ -74,13 +80,14 @@ class DDHConfig:
             landmark=raw.get("landmark", cls.landmark),
             ranking_weight=ranking_weight,
             ranking_sigma=ranking_sigma,
+            prediction_weight=prediction_weight,
         )
 
 
-def build_model(hidden_size: int, horizon: int) -> hk.Transformed:
-    """Create a GRU-based hazard predictor."""
+def build_model(hidden_size: int, horizon: int, feature_dim: int) -> hk.Transformed:
+    """Create a GRU-based hazard predictor with auxiliary step-ahead head."""
 
-    def forward(inputs: jnp.ndarray) -> jnp.ndarray:
+    def forward(inputs: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray]:
         batch_size = inputs.shape[0]
         x = hk.Linear(hidden_size)(inputs)
         x = jax.nn.relu(x)
@@ -91,8 +98,9 @@ def build_model(hidden_size: int, horizon: int) -> hk.Transformed:
         outputs, _ = hk.dynamic_unroll(core, x, initial_state)
         outputs = jnp.swapaxes(outputs, 0, 1)  # (B, T, hidden)
 
-        logits = hk.Linear(horizon)(outputs)
-        return logits
+        hazard_logits = hk.Linear(horizon)(outputs)
+        covariate_preds = hk.Linear(feature_dim)(outputs)
+        return hazard_logits, covariate_preds
 
     return hk.without_apply_rng(hk.transform(forward))
 
@@ -171,6 +179,18 @@ def ranking_loss_from_logits(logits: jnp.ndarray,
     denom = jnp.maximum(jnp.sum(valid), 1.0)
     loss = jnp.sum(rank_matrix * valid) / denom
     return loss
+
+
+def prediction_loss(predictions: jnp.ndarray,
+                    inputs: jnp.ndarray) -> jnp.ndarray:
+    preds = predictions[:, :-1]
+    targets = inputs[:, 1:]
+    if preds.shape[1] == 0:
+        return jnp.array(0.0, dtype=predictions.dtype)
+    diff = preds - targets
+    sq = jnp.sum(jnp.square(diff), axis=-1)
+    normalizer = preds.shape[1] * preds.shape[2]
+    return jnp.sum(sq) / (preds.shape[0] * normalizer)
 
 
 def median_time_from_survival(surv: jnp.ndarray) -> jnp.ndarray:
@@ -263,7 +283,8 @@ def train(config: DDHConfig) -> Dict[str, Any]:
     )
 
     horizon = config.dataset_kwargs.get("horizon", seqs.shape[1])
-    model = build_model(config.hidden_size, horizon)
+    feature_dim = seqs.shape[-1]
+    model = build_model(config.hidden_size, horizon, feature_dim)
 
     key = jax.random.PRNGKey(config.seed)
     sample = jnp.asarray(X_train[:1])
@@ -278,25 +299,30 @@ def train(config: DDHConfig) -> Dict[str, Any]:
                 batch_cs,
                 batch_y,
                 batch_m):
-        logits = model.apply(model_params, batch_x)
-        h_loss = hazard_loss_from_logits(logits, batch_y, batch_m)
-        r_loss = ranking_loss_from_logits(logits,
+        hazard_logits, cov_preds = model.apply(model_params, batch_x)
+        h_loss = hazard_loss_from_logits(hazard_logits, batch_y, batch_m)
+        r_loss = ranking_loss_from_logits(hazard_logits,
                                           batch_ts,
                                           batch_cs,
                                           axis=config.axis,
                                           sigma=config.ranking_sigma)
-        total = h_loss + config.ranking_weight * r_loss
-        return total, (h_loss, r_loss)
+        p_loss = prediction_loss(cov_preds, batch_x)
+        total = (h_loss
+                 + config.ranking_weight * r_loss
+                 + config.prediction_weight * p_loss)
+        return total, (h_loss, r_loss, p_loss)
 
     grad_fn = jax.value_and_grad(loss_fn, has_aux=True)
 
     hazard_history = []
     ranking_history = []
+    prediction_history = []
     total_history = []
     for epoch in range(1, config.num_epochs + 1):
         epoch_total = []
         epoch_hazard = []
         epoch_ranking = []
+        epoch_prediction = []
         for batch in train_gen:
             batch_x, batch_ts, batch_cs, batch_y, batch_m, _ = batch
             batch_x = jnp.asarray(batch_x)
@@ -305,7 +331,7 @@ def train(config: DDHConfig) -> Dict[str, Any]:
             batch_y = jnp.asarray(batch_y)
             batch_m = jnp.asarray(batch_m)
 
-            (total_loss, (hazard_loss, ranking_loss)), grads = grad_fn(
+            (total_loss, (hazard_loss, ranking_loss, pred_loss)), grads = grad_fn(
                 params,
                 batch_x,
                 batch_ts,
@@ -318,38 +344,43 @@ def train(config: DDHConfig) -> Dict[str, Any]:
             epoch_total.append(total_loss)
             epoch_hazard.append(hazard_loss)
             epoch_ranking.append(ranking_loss)
+            epoch_prediction.append(pred_loss)
 
         train_gen.reset()
         mean_total = float(jnp.mean(jnp.stack(epoch_total)))
         mean_hazard = float(jnp.mean(jnp.stack(epoch_hazard)))
         mean_ranking = float(jnp.mean(jnp.stack(epoch_ranking)))
+        mean_prediction = float(jnp.mean(jnp.stack(epoch_prediction)))
         total_history.append(mean_total)
         hazard_history.append(mean_hazard)
         ranking_history.append(mean_ranking)
+        prediction_history.append(mean_prediction)
 
         if epoch % config.log_interval == 0 or epoch == 1 or epoch == config.num_epochs:
             print(
                 f"Epoch {epoch:03d} | total: {mean_total:.4f} | "
-                f"hazard: {mean_hazard:.4f} | ranking: {mean_ranking:.4f}"
+                f"hazard: {mean_hazard:.4f} | ranking: {mean_ranking:.4f} | "
+                f"pred: {mean_prediction:.4f}"
             )
 
     test_x = jnp.asarray(X_test)
     test_y = jnp.asarray(y_test)
     test_m = jnp.asarray(m_test)
 
-    logits = model.apply(params, test_x)
-    test_hazard_loss = float(hazard_loss_from_logits(logits, test_y, test_m))
+    hazard_logits, cov_preds = model.apply(params, test_x)
+    test_hazard_loss = float(hazard_loss_from_logits(hazard_logits, test_y, test_m))
     test_ranking_loss = float(
         ranking_loss_from_logits(
-            logits,
+            hazard_logits,
             jnp.asarray(ts_test),
             jnp.asarray(cs_test),
             axis=config.axis,
             sigma=config.ranking_sigma,
         )
     )
+    test_prediction_loss = float(prediction_loss(cov_preds, test_x))
 
-    surv = survival_curve_from_logits(logits, axis=config.axis)
+    surv = survival_curve_from_logits(hazard_logits, axis=config.axis)
     med_times = np.asarray(median_time_from_survival(surv))
     ci = float(concordance_index(med_times, ts_test, cs_test))
     ibs = integrated_brier_score_numpy(
@@ -364,8 +395,10 @@ def train(config: DDHConfig) -> Dict[str, Any]:
         "total_history": total_history,
         "hazard_history": hazard_history,
         "ranking_history": ranking_history,
+        "prediction_history": prediction_history,
         "test_hazard_loss": test_hazard_loss,
         "test_ranking_loss": test_ranking_loss,
+        "test_prediction_loss": test_prediction_loss,
         "ci": ci,
         "ibs": ibs,
     }
@@ -374,17 +407,37 @@ def train(config: DDHConfig) -> Dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train minimal Dynamic-DeepHit baseline.")
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file.")
+    parser.add_argument("--seed", type=int, default=None, help="Seed for the experiment.")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     config = DDHConfig.from_yaml(args.config)
+    if args.seed is not None:
+        config.seed = args.seed  # overwrite seed in config
+        print(f"Seed: {config.seed}")
+    
+    config.num_epochs = 20
+
     results = train(config)
     print("Test hazard loss:", f"{results['test_hazard_loss']:.4f}")
     print("Test ranking loss:", f"{results['test_ranking_loss']:.4f}")
+    print("Test prediction loss:", f"{results['test_prediction_loss']:.4f}")
     print("Test c-index:", f"{results['ci']:.4f}")
     print("Test IBS:", f"{results['ibs']:.4f}")
+    print("Test IBS:", f"{results['ibs']:.4f}")
+    path_results = os.path.join('DDH_results', config.dataset_name, f'seed_{config.seed}')
+    os.makedirs(path_results, exist_ok=True)
+    new_res = {}
+    new_res['seed'] = config.seed
+    new_res['test_hazard_loss'] = results['test_hazard_loss']
+    new_res['test_ranking_loss'] = results['test_ranking_loss']
+    new_res['ci'] = results['ci']
+    new_res['ibs'] = results['ibs']
+    new_res['total_history'] = results['total_history']
+    with open(os.path.join(path_results, 'results.json'), 'w') as f:
+        json.dump(new_res, f)
 
 
 if __name__ == "__main__":

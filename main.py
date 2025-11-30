@@ -24,11 +24,13 @@ if __name__ == '__main__':
     parser.add_argument('--agent', type=str, default='SA',
                         help='SA or LambdaSA or DeepLambdaSA')
     parser.add_argument('--seed', help='Experiment seed', type=int, default=42)
-    parser.add_argument('--size', help='Test set ratio', type=float, default=.2)
+    parser.add_argument('--size', help='Test set ratio', type=float, default=.1)
+    parser.add_argument('--val_size', help='Validation set ratio', type=float, default=.1)
 
     # Overwrites some entries in config
     parser.add_argument('--taskid', help='Task id', type=int, default=None)
     parser.add_argument('--lambda_', help='Lambda', type=float, default=None)
+    parser.add_argument('--target_lr', help='Target learning rate', type=float, default=None)
     parser.add_argument('--landmark', help='Landmarking', type=int, default=None)
     args = parser.parse_args()
 
@@ -38,6 +40,7 @@ if __name__ == '__main__':
     seed = args.seed
     type_agent = args.agent
     size = args.size
+    val_size = args.val_size
 
     #Model parameters
     if args.taskid is not None:
@@ -45,7 +48,8 @@ if __name__ == '__main__':
 
     if args.lambda_ is not None:
         config['lambda_'] = args.lambda_
-    
+    if args.target_lr is not None:
+        config['target_lr'] = args.target_lr
     if args.landmark is not None:
         config['landmark'] = bool(args.landmark)
 
@@ -55,6 +59,7 @@ if __name__ == '__main__':
                                config['arch']['type'],
                                'lambda_{}'.format(config['lambda_']),
                                'landmark_{}'.format(config['landmark']),
+                               'target_lr_{}'.format(config['target_lr']),
                                exp_name)
     config['output_file'] = output_file
 
@@ -69,10 +74,19 @@ if __name__ == '__main__':
 
     try:
         # import ipdb; ipdb.set_trace()
-        train_gen, test_gen = agent.get_train_test(test_size=size)
+        gens = agent.get_train_test(test_size=size, val_size=val_size)
+        if len(gens) == 2:
+            train_gen, test_gen = gens
+            val_gen = None
+        else:
+            train_gen, test_gen, val_gen = gens
+
         agent.train(train_gen)
         agent.save()
-        agent.eval(test_gen)
+        agent.eval(test_gen, suffix='test')
+        if val_gen is not None:
+            agent.eval(val_gen, suffix='val')
+
         config_path = os.path.join(output_file, 'config.yaml')
         with open(config_path, 'w') as outfile:
             yaml.dump(config, outfile, default_flow_style=False)

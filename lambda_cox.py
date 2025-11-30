@@ -39,7 +39,8 @@ class LambdaSA(BaseSA):
                                self.data['ts'],
                                self.data['cs'],
                                seed=self.seed,
-                               test_size=test_size)
+                               test_size=test_size,
+                               stratify=self.config.dataset_name == "mimic")
         
         X_train, X_test, ts_train, ts_test, cs_train, cs_test = convert_to_jax_arrays(X_train, X_test, ts_train, ts_test, cs_train, cs_test)
         

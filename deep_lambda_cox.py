@@ -190,7 +190,7 @@ class DeepLambdaSA(BaseSA):
 
         self.update = jax.jit(update)
 
-    def get_train_test(self, test_size=.2):
+    def get_train_test(self, test_size=.1, val_size=.1):
         if self.config.calculate_tgt_and_mask:
             data_manager = TimesDataGenerator
         else:
@@ -205,7 +205,20 @@ class DeepLambdaSA(BaseSA):
                                                                                      self.data['ts'],
                                                                                      self.data['cs'],
                                                                                      seed=self.seed,
-                                                                                     test_size=test_size)
+                                                                                     test_size=test_size,
+                                                                                     stratify=self.config.dataset_name == "mimic")
+        X_val, y_val, hws_val, m_val, ts_val, cs_val = None, None, None, None, None, None
+        if val_size is not None:
+            X_val, X_test, y_val, y_test, hws_val, hws_test, \
+                m_val, m_test, ts_val, ts_test, cs_val, cs_test = train_test_split(self.data['seqs'],
+                                                                                     self.data['target'],
+                                                                                     self.data['h_ws'],
+                                                                                     self.data['mask'],
+                                                                                     self.data['ts'],
+                                                                                     self.data['cs'],
+                                                                                     seed=self.seed,
+                                                                                     test_size=val_size,
+                                                                                     stratify=self.config.dataset_name == "mimic")
         subkey = self._next_rng_key()
         train_gen = data_manager(X=X_train, h_ws=hws_train,
                                  ts=ts_train, cs=cs_train,
@@ -216,7 +229,22 @@ class DeepLambdaSA(BaseSA):
                                 ts=ts_test, cs=cs_test,
                                 y=y_test, mask=m_test,
                                 batch_size=self.config.batch_size, rng=subkey)
-        return train_gen, test_gen
+        if val_size is not None:
+            assert X_val is not None, "Validation set is not defined"
+            assert y_val is not None, "Validation set is not defined"
+            assert hws_val is not None, "Validation set is not defined"
+            assert m_val is not None, "Validation set is not defined"
+            assert ts_val is not None, "Validation set is not defined"
+            assert cs_val is not None, "Validation set is not defined"
+            
+            subkey = self._next_rng_key()
+            val_gen = data_manager(X=X_val, h_ws=hws_val,
+                                   ts=ts_val, cs=cs_val,
+                                   y=y_val, mask=m_val,
+                                   batch_size=self.config.batch_size, rng=subkey)
+            return train_gen, test_gen, val_gen
+        else:
+            return train_gen, test_gen
 
     def train(self, train_gen=None, test_gen=None):
 

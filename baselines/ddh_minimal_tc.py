@@ -12,8 +12,6 @@ import argparse
 from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
-import os
-import json
 from typing import Any, Dict
 
 import haiku as hk
@@ -22,14 +20,18 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 import yaml
+import os
+import json
+
 import sys
 sys.path.append(str(Path('..').resolve()))
-
+from deep_lambda_cox import _get_targets, _get_weights
 from utils import (
     TimesDataGenerator,
     concordance_index,
     get_data,
     train_test_split,
+    get_targets_and_masks,
 )
 
 
@@ -52,6 +54,8 @@ class DDHConfig:
     ranking_weight: float = 1.0
     ranking_sigma: float = 1.0  # .5 for all except mimic
     prediction_weight: float = 0.1
+    lambda_: float = 0.9
+    target_lr: float = 0.1
     lr_decay_rate: float = 0.99
     warmup_epochs: int = 50
     early_stopping_patience: int = 5
@@ -69,6 +73,8 @@ class DDHConfig:
         ranking_weight = raw.get("ddh_ranking_weight", cls.ranking_weight)
         ranking_sigma = raw.get("ddh_ranking_sigma", cls.ranking_sigma)
         prediction_weight = raw.get("ddh_prediction_weight", cls.prediction_weight)
+        lambda_ = raw.get("ddh_lambda", cls.lambda_)
+        target_lr = raw.get("ddh_target_lr", cls.target_lr)
         lr_decay_rate = raw.get("lr_decay_rate", cls.lr_decay_rate)
         warmup_epochs = raw.get("warmup_epochs", cls.warmup_epochs)
         early_stopping_patience = raw.get("early_stopping_patience", cls.early_stopping_patience)
@@ -81,7 +87,6 @@ class DDHConfig:
             num_epochs=raw.get("num_epochs", cls.num_epochs),
             hidden_size=hidden_size,
             test_size=raw.get("test_size", cls.test_size),
-            val_size=raw.get("val_size", cls.val_size),
             axis=raw.get("axis", cls.axis),
             seed=raw.get("seed", cls.seed),
             log_interval=raw.get("log_interval", cls.log_interval),
@@ -89,10 +94,19 @@ class DDHConfig:
             ranking_weight=ranking_weight,
             ranking_sigma=ranking_sigma,
             prediction_weight=prediction_weight,
+            lambda_=lambda_,
+            target_lr=target_lr,
             lr_decay_rate=lr_decay_rate,
             warmup_epochs=warmup_epochs,
             early_stopping_patience=early_stopping_patience,
         )
+
+
+@dataclass
+class ModelState:
+    params: hk.Params
+    tgt_params: hk.Params
+    opt_state: optax.OptState
 
 
 def build_model(hidden_size: int,
@@ -140,9 +154,10 @@ def build_model(hidden_size: int,
 
 def hazard_loss_from_logits(logits: jnp.ndarray,
                             targets: jnp.ndarray,
-                            mask: jnp.ndarray) -> jnp.ndarray:
+                            mask: jnp.ndarray,
+                            weights: jnp.ndarray | None = None) -> jnp.ndarray:
     bce = optax.sigmoid_binary_cross_entropy(logits, targets)
-    weights = mask.astype(jnp.float32)
+    weights = mask.astype(jnp.float32) if weights is None else weights * mask.astype(jnp.float32)
     normalizer = jnp.maximum(jnp.sum(weights), 1.0)
     return jnp.sum(bce * weights) / normalizer
 
@@ -279,12 +294,25 @@ def integrated_brier_score_numpy(surv: np.ndarray,
     return float(np.sum(scores) / (t_max * len(ts)))
 
 
+def get_targets(tgt_logits, ys, lambda_, horizon, batch_size):
+    s_tgt = jax.nn.sigmoid(tgt_logits)
+    h = _get_targets(s_tgt, ys, lambda_,
+                        horizon, batch_size)
+    return h
+
+
+def get_weights(s_ws, ys, cs, h_ws, lambda_, horizon, batch_size):
+    w = _get_weights(s_ws, h_ws, ys, cs,
+                        lambda_, horizon, batch_size)
+    return w
+
+
 def train(config: DDHConfig) -> Dict[str, Any]:
     seqs, ts, cs, target, h_ws, mask = get_data(
         config.dataset_name,
-        config.landmark,
-        True,
-        config.dataset_kwargs,
+        landmark=True,
+        calculate_tgt_and_mask=True,
+        kwargs=config.dataset_kwargs,
     )
 
     seqs = seqs.astype(np.float32)
@@ -294,18 +322,16 @@ def train(config: DDHConfig) -> Dict[str, Any]:
 
     X_train, X_val, X_test, y_train, y_val, y_test, hws_train, hws_val, hws_test, \
     m_train, m_val, m_test, ts_train, ts_val, ts_test, cs_train, cs_val, cs_test = \
-    train_test_split(
-        seqs,
-        target,
-        h_ws,
-        mask,
-        ts,
-        cs,
-        seed=config.seed,
-        test_size=config.test_size,
+    train_test_split(seqs, 
+        target, 
+        h_ws, 
+        mask, 
+        ts, 
+        cs, 
+        seed=config.seed, 
+        test_size=config.test_size, 
         val_size=config.val_size,
-        stratify=True
-    )
+        stratify=True)
 
     train_gen = TimesDataGenerator(
         X=X_train,
@@ -338,6 +364,7 @@ def train(config: DDHConfig) -> Dict[str, Any]:
     key = jax.random.PRNGKey(config.seed)
     sample = jnp.asarray(X_train[:1])
     params = model.init(key, sample)
+    tgt_params = jax.tree_map(lambda x: jnp.array(x), params)
 
     # Calculate steps per epoch
     steps_per_epoch = len(train_gen)
@@ -358,20 +385,26 @@ def train(config: DDHConfig) -> Dict[str, Any]:
     
     optimizer = optax.adam(lr_schedule)
     opt_state = optimizer.init(params)
+    tgt_update = partial(optax.incremental_update, step_size=config.target_lr)
+
+    state = ModelState(params=params, tgt_params=tgt_params, opt_state=opt_state)
 
     def loss_fn(model_params,
                 batch_x,
+                soft_targets,
                 batch_ts,
                 batch_cs,
-                batch_y,
-                batch_m):
+                batch_m,
+                weights):
         hazard_logits, cov_preds = model.apply(model_params, batch_x)
-        h_loss = hazard_loss_from_logits(hazard_logits, batch_y, batch_m)
-        r_loss = ranking_loss_from_logits(hazard_logits,
-                                          batch_ts,
-                                          batch_cs,
-                                          axis=config.axis,
-                                          sigma=config.ranking_sigma)
+        h_loss = hazard_loss_from_logits(hazard_logits, soft_targets, batch_m, weights)
+        r_loss = ranking_loss_from_logits(
+            hazard_logits,
+            batch_ts,
+            batch_cs,
+            axis=config.axis,
+            sigma=config.ranking_sigma,
+        )
         p_loss = prediction_loss(cov_preds, batch_x)
         total = (h_loss
                  + config.ranking_weight * r_loss
@@ -396,23 +429,39 @@ def train(config: DDHConfig) -> Dict[str, Any]:
         epoch_ranking = []
         epoch_prediction = []
         for batch in train_gen:
-            batch_x, batch_ts, batch_cs, batch_y, batch_m, _ = batch
-            batch_x = jnp.asarray(batch_x)
-            batch_ts = jnp.asarray(batch_ts)
-            batch_cs = jnp.asarray(batch_cs)
-            batch_y = jnp.asarray(batch_y)
-            batch_m = jnp.asarray(batch_m)
+            seqs, ts, cs, ys, m, h_ws = batch
+            
+            batch_x = jnp.asarray(seqs)
+            batch_ts = jnp.asarray(ts)
+            batch_cs = jnp.asarray(cs)
+            batch_y = jnp.asarray(ys)
+            batch_m = jnp.asarray(m)
+            batch_h_ws = jnp.asarray(h_ws)
+
+            tgt_logits, _ = model.apply(state.tgt_params, batch_x)
+            target_logprobs = jax.nn.log_sigmoid(tgt_logits)
+            s_ws = jnp.exp(jnp.cumsum(target_logprobs - tgt_logits, axis=-1))
+            s_ws = jnp.roll(s_ws, 1)
+            s_ws = s_ws.at[:, :, 0].set(1.0)
+
+            soft_targets = get_targets(tgt_logits, batch_y, config.lambda_, horizon, config.batch_size)
+            weights = get_weights(s_ws, batch_y, batch_cs, batch_h_ws, config.lambda_, horizon, config.batch_size)
 
             (total_loss, (hazard_loss, ranking_loss, pred_loss)), grads = grad_fn(
-                params,
+                state.params,
                 batch_x,
+                soft_targets,
                 batch_ts,
                 batch_cs,
-                batch_y,
                 batch_m,
+                weights,
             )
-            updates, opt_state = optimizer.update(grads, opt_state, params)
-            params = optax.apply_updates(params, updates)
+
+            updates, opt_state = optimizer.update(grads, state.opt_state, state.params)
+            new_params = optax.apply_updates(state.params, updates)
+            new_tgt_params = tgt_update(new_params, state.tgt_params)
+            state = ModelState(params=new_params, tgt_params=new_tgt_params, opt_state=opt_state)
+
             epoch_total.append(total_loss)
             epoch_hazard.append(hazard_loss)
             epoch_ranking.append(ranking_loss)
@@ -433,20 +482,32 @@ def train(config: DDHConfig) -> Dict[str, Any]:
         # Compute validation loss for early stopping
         val_total = []
         for val_batch in val_gen:
-            val_batch_x, val_batch_ts, val_batch_cs, val_batch_y, val_batch_m, _ = val_batch
-            val_batch_x = jnp.asarray(val_batch_x)
-            val_batch_ts = jnp.asarray(val_batch_ts)
-            val_batch_cs = jnp.asarray(val_batch_cs)
-            val_batch_y = jnp.asarray(val_batch_y)
-            val_batch_m = jnp.asarray(val_batch_m)
+            val_seqs, val_ts_batch, val_cs_batch, val_ys, val_m, val_h_ws_batch = val_batch
+            
+            val_batch_x = jnp.asarray(val_seqs)
+            val_batch_ts = jnp.asarray(val_ts_batch)
+            val_batch_cs = jnp.asarray(val_cs_batch)
+            val_batch_y = jnp.asarray(val_ys)
+            val_batch_m = jnp.asarray(val_m)
+            val_batch_h_ws = jnp.asarray(val_h_ws_batch)
+
+            val_tgt_logits, _ = model.apply(state.tgt_params, val_batch_x)
+            val_target_logprobs = jax.nn.log_sigmoid(val_tgt_logits)
+            val_s_ws = jnp.exp(jnp.cumsum(val_target_logprobs - val_tgt_logits, axis=-1))
+            val_s_ws = jnp.roll(val_s_ws, 1)
+            val_s_ws = val_s_ws.at[:, :, 0].set(1.0)
+
+            val_soft_targets = get_targets(val_tgt_logits, val_batch_y, config.lambda_, horizon, config.batch_size)
+            val_weights = get_weights(val_s_ws, val_batch_y, val_batch_cs, val_batch_h_ws, config.lambda_, horizon, config.batch_size)
 
             val_loss_total, _ = loss_fn(
-                params,
+                state.params,
                 val_batch_x,
+                val_soft_targets,
                 val_batch_ts,
                 val_batch_cs,
-                val_batch_y,
                 val_batch_m,
+                val_weights,
             )
             val_total.append(val_loss_total)
         
@@ -476,11 +537,12 @@ def train(config: DDHConfig) -> Dict[str, Any]:
                 f"best_val: {best_val_loss:.4f} | patience: {patience_counter}/{config.early_stopping_patience} | lr: {current_lr:.6f}"
             )
 
+    # Test loss
     test_x = jnp.asarray(X_test)
     test_y = jnp.asarray(y_test)
     test_m = jnp.asarray(m_test)
 
-    hazard_logits, cov_preds = model.apply(params, test_x)
+    hazard_logits, cov_preds = model.apply(state.params, test_x)
     test_hazard_loss = float(hazard_loss_from_logits(hazard_logits, test_y, test_m))
     test_ranking_loss = float(
         ranking_loss_from_logits(
@@ -495,43 +557,50 @@ def train(config: DDHConfig) -> Dict[str, Any]:
 
     surv = survival_curve_from_logits(hazard_logits, axis=config.axis)
     med_times = np.asarray(median_time_from_survival(surv))
-    ci = float(concordance_index(med_times, ts_test, cs_test))
-    ibs = integrated_brier_score_numpy(
+    test_ci = float(concordance_index(med_times, ts_test, cs_test))
+    test_ibs = integrated_brier_score_numpy(
         np.asarray(surv[:, 1:]),
         np.asarray(ts_test),
         np.asarray(cs_test),
     )
 
-    # Val evaluation
-    val_x = jnp.asarray(X_val)
-    val_y = jnp.asarray(y_val)
-    val_m = jnp.asarray(m_val)
-
-    val_hazard_logits, val_cov_preds = model.apply(params, val_x)
-    val_hazard_loss = float(hazard_loss_from_logits(val_hazard_logits, val_y, val_m))
-    val_ranking_loss = float(
-        ranking_loss_from_logits(
-            val_hazard_logits,
-            jnp.asarray(ts_val),
-            jnp.asarray(cs_val),
-            axis=config.axis,
+    # Val loss
+    if X_val is not None:
+        val_x = jnp.asarray(X_val)
+        val_y = jnp.asarray(y_val)
+        val_m = jnp.asarray(m_val)
+        val_hazard_logits, val_cov_preds = model.apply(state.tgt_params, val_x)
+        val_hazard_loss = float(hazard_loss_from_logits(val_hazard_logits, val_y, val_m))
+        val_ranking_loss = float(
+            ranking_loss_from_logits(
+                val_hazard_logits,
+                jnp.asarray(ts_val),
+                jnp.asarray(cs_val),
+                axis=config.axis,
             sigma=config.ranking_sigma,
         )
-    )
-    val_prediction_loss = float(prediction_loss(val_cov_preds, val_x))
+        )
+        val_prediction_loss = float(prediction_loss(val_cov_preds, val_x))
 
-    val_surv = survival_curve_from_logits(val_hazard_logits, axis=config.axis)
-    val_med_times = np.asarray(median_time_from_survival(val_surv))
-    val_ci = float(concordance_index(val_med_times, ts_val, cs_val))
-    val_ibs = integrated_brier_score_numpy(
-        np.asarray(val_surv[:, 1:]),
-        np.asarray(ts_val),
-        np.asarray(cs_val),
-    )
+        surv = survival_curve_from_logits(val_hazard_logits, axis=config.axis)
+        med_times = np.asarray(median_time_from_survival(surv))
+        val_ci = float(concordance_index(med_times, ts_val, cs_val))
+        val_ibs = integrated_brier_score_numpy(
+            np.asarray(surv[:, 1:]),
+            np.asarray(ts_val),
+            np.asarray(cs_val),
+        )
+    else:
+        val_hazard_loss = None
+        val_ranking_loss = None
+        val_prediction_loss = None
+        val_ci = None
+        val_ibs = None
 
     return {
-        "params": params,
-        "opt_state": opt_state,
+        "params": state.params,
+        "tgt_params": state.tgt_params,
+        "opt_state": state.opt_state,
         "total_history": total_history,
         "hazard_history": hazard_history,
         "ranking_history": ranking_history,
@@ -539,8 +608,8 @@ def train(config: DDHConfig) -> Dict[str, Any]:
         "test_hazard_loss": test_hazard_loss,
         "test_ranking_loss": test_ranking_loss,
         "test_prediction_loss": test_prediction_loss,
-        "test_ci": ci,
-        "test_ibs": ibs,
+        "test_ci": test_ci,
+        "test_ibs": test_ibs,
         "val_hazard_loss": val_hazard_loss,
         "val_ranking_loss": val_ranking_loss,
         "val_prediction_loss": val_prediction_loss,
@@ -553,6 +622,8 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train minimal Dynamic-DeepHit baseline.")
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file.")
     parser.add_argument("--seed", type=int, default=None, help="Seed for the experiment.")
+    parser.add_argument("--lambda_", type=float, default=0.9, help="Lambda for the experiment.")
+    parser.add_argument("--target_lr", type=float, default=0.1, help="Target learning rate for the experiment.")
     return parser.parse_args()
 
 
@@ -562,9 +633,12 @@ def main() -> None:
     if args.seed is not None:
         config.seed = args.seed  # overwrite seed in config
         print(f"Seed: {config.seed}")
-    
-    config.num_epochs = 50
+
     config.log_interval = 5
+    config.lambda_ = args.lambda_
+    config.target_lr = args.target_lr
+    config.num_epochs = 50 * int(1/(config.target_lr))
+    print(f"Lambda: {config.lambda_}\nTarget learning rate: {config.target_lr}\n")
 
     results = train(config)
     print("Test hazard loss:", f"{results['test_hazard_loss']:.4f}")
@@ -577,10 +651,17 @@ def main() -> None:
     print("Val prediction loss:", f"{results['val_prediction_loss']:.4f}")
     print("Val c-index:", f"{results['val_ci']:.4f}")
     print("Val IBS:", f"{results['val_ibs']:.4f}")
-    path_results = os.path.join('DDH_results', config.dataset_name, f'seed_{config.seed}')
+    path_results = os.path.join('DDH_results_TC', 
+        config.dataset_name, 
+        f'seed_{config.seed}', 
+        'lambda_{}'.format(config.lambda_),
+        'target_lr_{}'.format(config.target_lr)
+    )
     os.makedirs(path_results, exist_ok=True)
     new_res = {}
     new_res['seed'] = config.seed
+    new_res['lambda_'] = config.lambda_
+    new_res['target_lr'] = config.target_lr
     new_res['test_hazard_loss'] = results['test_hazard_loss']
     new_res['test_ranking_loss'] = results['test_ranking_loss']
     new_res['test_prediction_loss'] = results['test_prediction_loss']

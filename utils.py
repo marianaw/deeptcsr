@@ -99,7 +99,8 @@ def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
                'churn_lastfm_months': get_churn_lastfm_dataset_months,
                'churn_lastfm_days': get_churn_lastfm_dataset_days,
                'churn_kkbox': get_churn_kkbox,
-               'nasa': get_nasa}
+               'nasa': get_nasa, 
+               'mimic': get_mimic}
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)
         if calculate_tgt_and_mask:
@@ -110,6 +111,27 @@ def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
         raise Exception('type of dataset not found.')
 
     return seqs, ts, cs, target, h_ws, mask
+
+
+def get_mimic(data_path, horizon=None, split=True, pad=False):
+    with h5py.File(data_path, 'r') as f:
+        seqs = np.array(f['seqs'])
+        ts = np.array(f['ts'])
+        cs = np.array(f['cs'])
+
+    # We fill nan's with zeros for now:
+    # seqs = np.nan_to_num(seqs, nan=0.0)
+    seqs = seqs.astype(np.float32)
+
+    feature_means = np.nanmean(seqs, axis=(0, 1))
+    feature_means = np.where(np.isnan(feature_means), 0.0, feature_means)
+    feature_stds = np.nanstd(seqs, axis=(0, 1))
+    feature_stds = np.where((feature_stds < 1e-12) | np.isnan(feature_stds), 1.0, feature_stds)
+
+    seqs = np.where(np.isnan(seqs), feature_means[None, None, :], seqs)
+    seqs = (seqs - feature_means[None, None, :]) / feature_stds[None, None, :]
+
+    return seqs, ts, cs
 
 
 def get_nasa(data_path, horizon=None, split=True, pad=False):
@@ -379,19 +401,74 @@ def get_placeholder(dim, horizon, data_path=None):
     return seqs, ts, cs
 
 
-def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2):
-    # Shuffle the indices of the data
-    num_samples = X.shape[0]
-    shuffled_indices = np.arange(num_samples)
-    np.random.seed(seed)
-    np.random.shuffle(shuffled_indices)
+def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2, val_size=None, stratify=False):
+    if val_size is not None:
+        assert test_size + val_size <= 1, "Test and validation sizes must sum to less than or equal to 1"
 
-    # Calculate the number of samples in the test set
-    num_test_samples = int(num_samples * test_size)
+    if stratify:
+        uncensored_indices = np.where(cs == False)[0]
+        censored_indices = np.where(cs == True)[0]
 
-    # Split the shuffled indices into train and test sets
-    test_indices = shuffled_indices[:num_test_samples]
-    train_indices = shuffled_indices[num_test_samples:]
+        # Shuffle the indices within each group
+        np.random.seed(seed)
+        np.random.shuffle(uncensored_indices)
+        np.random.shuffle(censored_indices)
+
+        # Calculate the number of samples in each set for each group
+        num_uncensored_test_samples = int(len(uncensored_indices) * test_size)
+        num_censored_test_samples = int(len(censored_indices) * test_size)
+        
+        if val_size is not None:
+            num_uncensored_val_samples = int(len(uncensored_indices) * val_size)
+            num_censored_val_samples = int(len(censored_indices) * val_size)
+            
+            # Split each group into training, validation, and testing sets
+            uncensored_test_indices = uncensored_indices[:num_uncensored_test_samples]
+            uncensored_val_indices = uncensored_indices[num_uncensored_test_samples:num_uncensored_test_samples + num_uncensored_val_samples]
+            uncensored_train_indices = uncensored_indices[num_uncensored_test_samples + num_uncensored_val_samples:]
+            
+            censored_test_indices = censored_indices[:num_censored_test_samples]
+            censored_val_indices = censored_indices[num_censored_test_samples:num_censored_test_samples + num_censored_val_samples]
+            censored_train_indices = censored_indices[num_censored_test_samples + num_censored_val_samples:]
+            
+            # Combine the sets from both groups
+            train_indices = np.concatenate([uncensored_train_indices, censored_train_indices])
+            val_indices = np.concatenate([uncensored_val_indices, censored_val_indices])
+            test_indices = np.concatenate([uncensored_test_indices, censored_test_indices])
+        else:
+            # Split each group into training and testing sets (no validation)
+            uncensored_test_indices = uncensored_indices[:num_uncensored_test_samples]
+            uncensored_train_indices = uncensored_indices[num_uncensored_test_samples:]
+            censored_test_indices = censored_indices[:num_censored_test_samples]
+            censored_train_indices = censored_indices[num_censored_test_samples:]
+
+            # Combine the training and testing sets from both groups
+            train_indices = np.concatenate([uncensored_train_indices, censored_train_indices])
+            test_indices = np.concatenate([uncensored_test_indices, censored_test_indices])
+            val_indices = None
+    
+    else:
+        # Shuffle the indices of the data
+        num_samples = X.shape[0]
+        shuffled_indices = np.arange(num_samples)
+        np.random.seed(seed)
+        np.random.shuffle(shuffled_indices)
+
+        # Calculate the number of samples in each set
+        num_test_samples = int(num_samples * test_size)
+        
+        if val_size is not None:
+            num_val_samples = int(num_samples * val_size)
+            
+            # Split the shuffled indices into train, validation, and test sets
+            test_indices = shuffled_indices[:num_test_samples]
+            val_indices = shuffled_indices[num_test_samples:num_test_samples + num_val_samples]
+            train_indices = shuffled_indices[num_test_samples + num_val_samples:]
+        else:
+            # Split the shuffled indices into train and test sets (no validation)
+            test_indices = shuffled_indices[:num_test_samples]
+            train_indices = shuffled_indices[num_test_samples:]
+            val_indices = None
 
     # Use the indices to split the data
     X_train = X[train_indices]
@@ -401,6 +478,16 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2):
     cs_train = cs[train_indices]
     cs_test = cs[test_indices]
 
+    # Handle validation set if val_size is provided
+    if val_indices is not None:
+        X_val = X[val_indices]
+        ts_val = ts[val_indices]
+        cs_val = cs[val_indices]
+    else:
+        X_val = None
+        ts_val = None
+        cs_val = None
+
     if target is not None and h_ws is not None and mask is not None:
         y_train = target[train_indices]
         y_test = target[test_indices]
@@ -408,14 +495,28 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2):
         hws_test = h_ws[test_indices]
         m_train = mask[train_indices]
         m_test = mask[test_indices]
+        
+        if val_indices is not None:
+            y_val = target[val_indices]
+            hws_val = h_ws[val_indices]
+            m_val = mask[val_indices]
+        else:
+            y_val = None
+            hws_val = None
+            m_val = None
 
     else:
-        y_train, y_test = None, None
-        hws_train, hws_test = None, None
-        m_train, m_test = None, None
+        y_train, y_test, y_val = None, None, None
+        hws_train, hws_test, hws_val = None, None, None
+        m_train, m_test, m_val = None, None, None
 
-    return X_train, X_test, y_train, y_test, hws_train, hws_test, \
-        m_train, m_test, ts_train, ts_test, cs_train, cs_test
+    # Return validation sets if they exist, otherwise return the original format
+    if val_indices is not None:
+        return X_train, X_val, X_test, y_train, y_val, y_test, hws_train, hws_val, hws_test, \
+            m_train, m_val, m_test, ts_train, ts_val, ts_test, cs_train, cs_val, cs_test
+    else:
+        return X_train, X_test, y_train, y_test, hws_train, hws_test, \
+            m_train, m_test, ts_train, ts_test, cs_train, cs_test
 
 
 class BaseDataGenerator:

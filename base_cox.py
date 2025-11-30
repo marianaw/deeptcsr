@@ -350,7 +350,7 @@ class BaseSA:
 
         return path
 
-    def eval(self, test_gen):
+    def eval(self, test_gen, suffix=''):
         seqs = test_gen.X
         ts = test_gen.ts
         cs = test_gen.cs
@@ -364,7 +364,7 @@ class BaseSA:
         if output_path is not None:
             ci = ci.item()
             bs = bs.item()
-            path_result = os.path.join(output_path, 'results.json')
+            path_result = os.path.join(output_path, f'results_{suffix}.json')
             data = {'ci': ci, 'bs': bs}
             with open(path_result, 'w') as json_file:
                 json.dump(data, json_file)

@@ -99,7 +99,7 @@ def get_data(dataset_name, landmark, calculate_tgt_and_mask, kwargs):
                'churn_lastfm_months': get_churn_lastfm_dataset_months,
                'churn_lastfm_days': get_churn_lastfm_dataset_days,
                'churn_kkbox': get_churn_kkbox,
-               'nasa': get_nasa, 
+               'nasa': get_nasa,
                'mimic': get_mimic}
     try:
         seqs, ts, cs = loaders[dataset_name](**kwargs)
@@ -126,7 +126,8 @@ def get_mimic(data_path, horizon=None, split=True, pad=False):
     feature_means = np.nanmean(seqs, axis=(0, 1))
     feature_means = np.where(np.isnan(feature_means), 0.0, feature_means)
     feature_stds = np.nanstd(seqs, axis=(0, 1))
-    feature_stds = np.where((feature_stds < 1e-12) | np.isnan(feature_stds), 1.0, feature_stds)
+    feature_stds = np.where((feature_stds < 1e-12) |
+                            np.isnan(feature_stds), 1.0, feature_stds)
 
     seqs = np.where(np.isnan(seqs), feature_means[None, None, :], seqs)
     seqs = (seqs - feature_means[None, None, :]) / feature_stds[None, None, :]
@@ -151,7 +152,8 @@ def get_churn_kkbox(data_path, horizon=None, split=True, pad=False, use_static_f
     scaler = StandardScaler()
     cols = ['num_25', 'num_50',	'num_75', 'num_985',
             'num_100', 'num_unq', 'log_minutes']
-    df_logs = pd.DataFrame(scaler.fit_transform(df_logs_orig[cols]), columns=cols)
+    df_logs = pd.DataFrame(scaler.fit_transform(
+        df_logs_orig[cols]), columns=cols)
     df_logs['msno'] = df_logs_orig.msno.values
 
     assert len(df_logs_orig) == len(df_logs)
@@ -179,7 +181,7 @@ def get_churn_kkbox(data_path, horizon=None, split=True, pad=False, use_static_f
     return seqs, ts, cs
 
 
-def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=False, use_static_fs=False):
+def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=False, use_static_fs=False, normalize=True):
     df_logs = pd.read_csv(os.path.join(data_path, 'surv_logs_last.csv'))
     df_logs = df_logs.drop(columns=['Unnamed: 0'])
     df_events = pd.read_csv(os.path.join(data_path, 'events.csv'))
@@ -195,9 +197,14 @@ def get_churn_lastfm_dataset_months(data_path, horizon=None, split=True, pad=Fal
         return padded_values
 
     # Get sequences
-    numeric_columns = df_logs.select_dtypes(include=np.number).columns
-    # scaler = StandardScaler()
-    # df_logs[numeric_columns] = scaler.fit_transform(df_logs[numeric_columns])
+    # numeric_columns = df_logs.select_dtypes(include=np.number).columns
+    numeric_columns = ['listen_count',
+                       'unique_artists',	'artist_entropy',	'repeat_ratio',	'novelty',	'delta_listen_count',
+                       'delta_unique_artists',	'delta_artist_entropy',	'delta_repeat_ratio',	'delta_novelty']
+    if normalize:
+        scaler = StandardScaler()
+        df_logs[numeric_columns] = scaler.fit_transform(
+            df_logs[numeric_columns])
     df_logs = df_logs[['userid'] + list(numeric_columns)]
 
     if use_static_fs:
@@ -403,7 +410,8 @@ def get_placeholder(dim, horizon, data_path=None):
 
 def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2, val_size=None, stratify=False):
     if val_size is not None:
-        assert test_size + val_size <= 1, "Test and validation sizes must sum to less than or equal to 1"
+        assert test_size + \
+            val_size <= 1, "Test and validation sizes must sum to less than or equal to 1"
 
     if stratify:
         uncensored_indices = np.where(cs == False)[0]
@@ -417,24 +425,32 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2, val_siz
         # Calculate the number of samples in each set for each group
         num_uncensored_test_samples = int(len(uncensored_indices) * test_size)
         num_censored_test_samples = int(len(censored_indices) * test_size)
-        
+
         if val_size is not None:
-            num_uncensored_val_samples = int(len(uncensored_indices) * val_size)
+            num_uncensored_val_samples = int(
+                len(uncensored_indices) * val_size)
             num_censored_val_samples = int(len(censored_indices) * val_size)
-            
+
             # Split each group into training, validation, and testing sets
             uncensored_test_indices = uncensored_indices[:num_uncensored_test_samples]
-            uncensored_val_indices = uncensored_indices[num_uncensored_test_samples:num_uncensored_test_samples + num_uncensored_val_samples]
-            uncensored_train_indices = uncensored_indices[num_uncensored_test_samples + num_uncensored_val_samples:]
-            
+            uncensored_val_indices = uncensored_indices[num_uncensored_test_samples:
+                                                        num_uncensored_test_samples + num_uncensored_val_samples]
+            uncensored_train_indices = uncensored_indices[num_uncensored_test_samples +
+                                                          num_uncensored_val_samples:]
+
             censored_test_indices = censored_indices[:num_censored_test_samples]
-            censored_val_indices = censored_indices[num_censored_test_samples:num_censored_test_samples + num_censored_val_samples]
-            censored_train_indices = censored_indices[num_censored_test_samples + num_censored_val_samples:]
-            
+            censored_val_indices = censored_indices[num_censored_test_samples:
+                                                    num_censored_test_samples + num_censored_val_samples]
+            censored_train_indices = censored_indices[num_censored_test_samples +
+                                                      num_censored_val_samples:]
+
             # Combine the sets from both groups
-            train_indices = np.concatenate([uncensored_train_indices, censored_train_indices])
-            val_indices = np.concatenate([uncensored_val_indices, censored_val_indices])
-            test_indices = np.concatenate([uncensored_test_indices, censored_test_indices])
+            train_indices = np.concatenate(
+                [uncensored_train_indices, censored_train_indices])
+            val_indices = np.concatenate(
+                [uncensored_val_indices, censored_val_indices])
+            test_indices = np.concatenate(
+                [uncensored_test_indices, censored_test_indices])
         else:
             # Split each group into training and testing sets (no validation)
             uncensored_test_indices = uncensored_indices[:num_uncensored_test_samples]
@@ -443,10 +459,12 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2, val_siz
             censored_train_indices = censored_indices[num_censored_test_samples:]
 
             # Combine the training and testing sets from both groups
-            train_indices = np.concatenate([uncensored_train_indices, censored_train_indices])
-            test_indices = np.concatenate([uncensored_test_indices, censored_test_indices])
+            train_indices = np.concatenate(
+                [uncensored_train_indices, censored_train_indices])
+            test_indices = np.concatenate(
+                [uncensored_test_indices, censored_test_indices])
             val_indices = None
-    
+
     else:
         # Shuffle the indices of the data
         num_samples = X.shape[0]
@@ -456,14 +474,16 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2, val_siz
 
         # Calculate the number of samples in each set
         num_test_samples = int(num_samples * test_size)
-        
+
         if val_size is not None:
             num_val_samples = int(num_samples * val_size)
-            
+
             # Split the shuffled indices into train, validation, and test sets
             test_indices = shuffled_indices[:num_test_samples]
-            val_indices = shuffled_indices[num_test_samples:num_test_samples + num_val_samples]
-            train_indices = shuffled_indices[num_test_samples + num_val_samples:]
+            val_indices = shuffled_indices[num_test_samples:
+                                           num_test_samples + num_val_samples]
+            train_indices = shuffled_indices[num_test_samples +
+                                             num_val_samples:]
         else:
             # Split the shuffled indices into train and test sets (no validation)
             test_indices = shuffled_indices[:num_test_samples]
@@ -495,7 +515,7 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2, val_siz
         hws_test = h_ws[test_indices]
         m_train = mask[train_indices]
         m_test = mask[test_indices]
-        
+
         if val_indices is not None:
             y_val = target[val_indices]
             hws_val = h_ws[val_indices]

@@ -11,22 +11,23 @@ arch:
   type: transformer
   arch_kwargs:
     hidden_size: 16
-    seq_len: 53  # Has to be the same as the horizon
+    seq_len: 226  # Has to be the same as the horizon
     output_dim: 8
     num_layers: 1
     dropout: 0.05
 
-output_file: /Users/mariana/Documents/col/lts4/survan/Results/{}/
+output_file: /Users/mariana/Documents/projects/survival_analysis/Results/{}/
 # output_file: /home/mvargas/code/Huawei/Results/{}/
 
 preprocessed_data: False
 calculate_tgt_and_mask: True
 dataset_kwargs:
-  horizon: 53
-  data_path: /Users/mariana/Documents/mariana_lts4mac_backup/SurvanData/lastfm-dataset-1K
+  horizon: 226
+  data_path: /Users/mariana/Documents/projects/survival_analysis/data/lastfm-dataset-1K
   # data_path: /home/mvargas/code/Huawei/SurvanData/lastfm-dataset-1K
   use_static_fs: False
 
 lambda_: 0.95
 num_steps: 5
 verbose: True
+stratify: True

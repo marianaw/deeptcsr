@@ -44,6 +44,7 @@ class ConfigParams:
     output_file: str = None
     ckpt_path: str = None
     stratify: bool = None
+    early_stopping_patience: int = 5
     # horizon: int
 
     @classmethod

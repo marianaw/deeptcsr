@@ -190,7 +190,7 @@ class DeepLambdaSA(BaseSA):
 
         self.update = jax.jit(update)
 
-    def get_train_test(self, test_size=.1, val_size=.1):
+    def get_train_test(self, test_size=.2, val_size=.2):
         if self.config.calculate_tgt_and_mask:
             data_manager = TimesDataGenerator
         else:
@@ -246,17 +246,24 @@ class DeepLambdaSA(BaseSA):
         else:
             return train_gen, test_gen
 
-    def train(self, train_gen=None, test_gen=None):
+    def train(self, train_gen=None, test_gen=None, val_gen=None):
 
         if train_gen is None:
-            train_gen, test_gen = self.get_train_test()
+            train_gen, test_gen, val_gen = self.get_train_test()
 
         losses = []
         iter_range = range(self.config.num_epochs)
         if self.config.verbose:
             iter_range = tqdm(iter_range)
 
+        # For early-stopping:
+        improvement_threshold = 1e-4
+        best_val_loss = float('inf')
+        patience_counter = 0
+
         for epoch in iter_range:
+
+            # Training
             for batch in train_gen:
                 if self.calculate_tgt_and_mask_at_epoch:
                     seqs, ts, cs = batch
@@ -297,14 +304,18 @@ class DeepLambdaSA(BaseSA):
                 losses.append(loss.item())
             train_gen.reset()
 
-        # if self.output_file is not None:
-        #     if not os.path.exists(self.output_file):
-        #         os.makedirs(self.output_file)
-
-        #     df = pd.DataFrame({
-        #         "loss": losses,
-        #     })
-        #     path_csv = os.path.join(self.output_file, 'result.csv')
-        #     df.to_csv(path_csv)
+            # Early stopping
+            if val_gen is not None:
+                val_loss = self.test_step(val_gen)
+                if val_loss < (best_val_loss - improvement_threshold):
+                    best_val_loss = val_loss
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    
+                # Check if early stopping should be triggered
+                if patience_counter >= self.config.early_stopping_patience:
+                    print(f"Early stopping at epoch {epoch} (patience={self.config.early_stopping_patience})")
+                    break
 
         return losses

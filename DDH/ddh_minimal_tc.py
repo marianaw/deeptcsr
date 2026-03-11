@@ -25,7 +25,8 @@ import json
 
 import sys
 sys.path.append(str(Path('..').resolve()))
-from deep_lambda_cox import _get_targets, _get_weights
+# sys.path.append('/Users/mariana/Documents/projects/survival_analysis/survan')
+from Cox.deep_lambda_cox import _get_targets, _get_weights
 from utils import (
     TimesDataGenerator,
     concordance_index,

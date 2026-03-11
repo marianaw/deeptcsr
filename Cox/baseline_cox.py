@@ -5,7 +5,7 @@ import optax
 
 from tqdm import tqdm
 from utils import LazyTimesDataGenerator, TgtMskDataGenerator, train_test_split
-from base_cox import BaseSA
+from .base_cox import BaseSA
 
 Params = chex.ArrayTree
 PRNGKey = chex.PRNGKey

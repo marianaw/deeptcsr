@@ -531,12 +531,8 @@ def train_test_split(X, target, h_ws, mask, ts, cs, seed, test_size=0.2, val_siz
         m_train, m_test, m_val = None, None, None
 
     # Return validation sets if they exist, otherwise return the original format
-    if val_indices is not None:
-        return X_train, X_val, X_test, y_train, y_val, y_test, hws_train, hws_val, hws_test, \
-            m_train, m_val, m_test, ts_train, ts_val, ts_test, cs_train, cs_val, cs_test
-    else:
-        return X_train, X_test, y_train, y_test, hws_train, hws_test, \
-            m_train, m_test, ts_train, ts_test, cs_train, cs_test
+    return X_train, X_val, X_test, y_train, y_val, y_test, hws_train, hws_val, hws_test, \
+        m_train, m_val, m_test, ts_train, ts_val, ts_test, cs_train, cs_val, cs_test
 
 
 class BaseDataGenerator:

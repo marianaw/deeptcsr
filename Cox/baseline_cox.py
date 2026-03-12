@@ -5,7 +5,7 @@ import optax
 
 from tqdm import tqdm
 from utils import LazyTimesDataGenerator, TgtMskDataGenerator, train_test_split
-from .base_cox import BaseSA
+from base_cox import BaseSA
 
 Params = chex.ArrayTree
 PRNGKey = chex.PRNGKey
@@ -65,7 +65,7 @@ class SA(BaseSA):
                                                                                      self.data['cs'],
                                                                                      seed=self.seed,
                                                                                      test_size=test_size,
-                                                                                     stratify=self.config.dataset_name == "mimic")
+                                                                                     stratify=self.config.stratify)
         X_val, y_val, hws_val, m_val, ts_val, cs_val = None, None, None, None, None, None
         if val_size is not None:
             X_val, X_test, y_val, y_test, hws_val, hws_test, \
@@ -77,7 +77,7 @@ class SA(BaseSA):
                                                                                    self.data['cs'],
                                                                                    seed=self.seed,
                                                                                    test_size=val_size,
-                                                                                   stratify=self.config.dataset_name == "mimic")
+                                                                                   stratify=self.config.stratify)
         subkey = self._next_rng_key()
         train_gen = data_manager(X=X_train,
                                  ts=ts_train, cs=cs_train,
@@ -94,7 +94,7 @@ class SA(BaseSA):
             val_gen = data_manager(X=X_val,
                                    ts=ts_val, cs=cs_val,
                                    y=y_val, mask=m_val,
-                                   batch_siz=self.config.batch_size, rng=subkey)
+                                   batch_size=self.config.batch_size, rng=subkey)
 
         return train_gen, test_gen, val_gen
 

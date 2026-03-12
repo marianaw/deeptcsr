@@ -24,8 +24,8 @@ if __name__ == '__main__':
     parser.add_argument('--agent', type=str, default='SA',
                         help='SA or LambdaSA or DeepLambdaSA')
     parser.add_argument('--seed', help='Experiment seed', type=int, default=42)
-    parser.add_argument('--size', help='Test set ratio', type=float, default=.1)
-    parser.add_argument('--val_size', help='Validation set ratio', type=float, default=.1)
+    parser.add_argument('--size', help='Test set ratio', type=float, default=.2)
+    parser.add_argument('--val_size', help='Validation set ratio', type=float, default=.2)
 
     # Overwrites some entries in config
     parser.add_argument('--taskid', help='Task id', type=int, default=None)

@@ -21,7 +21,7 @@ preprocessed_data: False  # In the case of the NASA dataset, this should be True
 # ckpt_path: /Users/mariana/Documents/projects/Huawei/Results/SA/big_rw/transformer/lambda_0.0/landmark_False/seed_{}
 dataset_kwargs:
   horizon: 480
-  data_path: /Users/mariana/Documents/col/lts4/SurvanData/mimic_iv/mimic.h5
+  data_path: /Users/mariana/Documents/projects/survival_analysis/SurvanData/mimic_iv/mimic.h5
 
 lambda_: .95
 num_steps: 5

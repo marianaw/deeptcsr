@@ -14,15 +14,13 @@ DATASET=$(python -c "import yaml; c=yaml.safe_load(open('$1')); print(c['dataset
 ARCH=$(python -c "import yaml; c=yaml.safe_load(open('$1')); print(c['arch']['type'])")
 DEF_LAMBDA=$(python -c "import yaml; c=yaml.safe_load(open('$1')); print(c['lambda_'])")
 DEF_TARGET_LR=$(python -c "import yaml; c=yaml.safe_load(open('$1')); print(c['target_lr'])")
-OUT_DLS=$(python -c "import yaml; c=yaml.safe_load(open('$1')); print(c['output_file'].rstrip('/').format('DeepLambdaSA'))")
-OUT_SA=$(python -c "import yaml; c=yaml.safe_load(open('$1')); print(c['output_file'].rstrip('/').format('SA'))")
 
 # For DeepLambdaSA
 echo "Running DeepLambdaSA"
 for seed in {0..10}; do
     for lambda in 0.1 0.5 0.8 0.95; do
         for target_lr in 0.05 0.1 0.25; do
-            result="${OUT_DLS}/${DATASET}/${ARCH}/lambda_${lambda}/landmark_True/target_lr_${target_lr}/exp_1/seed_${seed}/results_test.json"
+            result="Results/DeepLambdaSA/${DATASET}/${ARCH}/lambda_${lambda}/landmark_True/target_lr_${target_lr}/exp_1/seed_${seed}/results_test.json"
             if [ -f "$result" ]; then echo "Skipping DeepLambdaSA seed=$seed lambda=$lambda target_lr=$target_lr (done)"; continue; fi
             throttle
             python main.py --seed $seed --config $1 --agent DeepLambdaSA --lambda_ $lambda --target_lr $target_lr --landmark 1 &
@@ -35,7 +33,7 @@ echo "Running SA"
 for seed in {0..10}; do
     for landmark in 0 1; do
         landmark_bool=$([ "$landmark" -eq 1 ] && echo "True" || echo "False")
-        result="${OUT_SA}/${DATASET}/${ARCH}/lambda_${DEF_LAMBDA}/landmark_${landmark_bool}/target_lr_${DEF_TARGET_LR}/exp_1/seed_${seed}/results_test.json"
+        result="Results/SA/${DATASET}/${ARCH}/lambda_${DEF_LAMBDA}/landmark_${landmark_bool}/target_lr_${DEF_TARGET_LR}/exp_1/seed_${seed}/results_test.json"
         if [ -f "$result" ]; then echo "Skipping SA seed=$seed landmark=$landmark (done)"; continue; fi
         throttle
         python main.py --seed $seed --config $1 --agent SA --landmark $landmark &

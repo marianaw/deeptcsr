@@ -3,7 +3,7 @@ import chex
 import jax
 import jax.numpy as jnp
 import optax
-from .base_cox import BaseSA, ConfigParams, Params
+from base_cox import BaseSA, ConfigParams, Params
 from utils import LazyTimesDataGenerator, TimesDataGenerator, convert_to_jax_arrays, get_targets_and_masks, train_test_split
 from dataclasses import dataclass
 from tqdm import tqdm

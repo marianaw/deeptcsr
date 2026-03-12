@@ -14,7 +14,7 @@ import haiku as hk
 import optax
 import numpy as np
 
-from .networks import TCN, CoxLinearModel, TSTransformer, get_update_and_apply
+from networks import TCN, CoxLinearModel, TSTransformer, get_update_and_apply
 from utils import concordance_index, convert_to_jax_arrays, get_data, get_targets_and_masks, kaplan_meier, load_preprocessed_dataset
 
 

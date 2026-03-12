@@ -16,7 +16,7 @@ arch:
     num_layers: 1
     dropout: 0.05
 
-output_file: /Users/mariana/Documents/projects/survival_analysis/Results/{}/
+output_file: /Users/mariana/Documents/projects/survival_analysis/survan/Cox/Results/{}/
 # output_file: /home/mvargas/code/Huawei/Results/{}/
 
 preprocessed_data: False

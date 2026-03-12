@@ -197,28 +197,17 @@ class DeepLambdaSA(BaseSA):
             data_manager = LazyTimesDataGenerator
 
         subkey = self._next_rng_key()
-        X_train, X_test, y_train, y_test, hws_train, hws_test, \
-            m_train, m_test, ts_train, ts_test, cs_train, cs_test = train_test_split(self.data['seqs'],
-                                                                                     self.data['target'],
-                                                                                     self.data['h_ws'],
-                                                                                     self.data['mask'],
-                                                                                     self.data['ts'],
-                                                                                     self.data['cs'],
-                                                                                     seed=self.seed,
-                                                                                     test_size=test_size,
-                                                                                     stratify=self.config.stratify)
-        X_val, y_val, hws_val, m_val, ts_val, cs_val = None, None, None, None, None, None
-        if val_size is not None:
-            X_val, X_test, y_val, y_test, hws_val, hws_test, \
-                m_val, m_test, ts_val, ts_test, cs_val, cs_test = train_test_split(self.data['seqs'],
-                                                                                     self.data['target'],
-                                                                                     self.data['h_ws'],
-                                                                                     self.data['mask'],
-                                                                                     self.data['ts'],
-                                                                                     self.data['cs'],
-                                                                                     seed=self.seed,
-                                                                                     test_size=val_size,
-                                                                                     stratify=self.config.stratify)
+        X_train, X_val, X_test, y_train, y_val, y_test, hws_train, hws_val, hws_test, \
+        m_train, m_val, m_test, ts_train, ts_val, ts_test, cs_train, cs_val, cs_test = train_test_split(self.data['seqs'],
+                                                                                    self.data['target'],
+                                                                                    self.data['h_ws'],
+                                                                                    self.data['mask'],
+                                                                                    self.data['ts'],
+                                                                                    self.data['cs'],
+                                                                                    seed=self.seed,
+                                                                                    test_size=test_size,
+                                                                                    val_size=val_size,
+                                                                                    stratify=self.config.stratify)
         subkey = self._next_rng_key()
         train_gen = data_manager(X=X_train, h_ws=hws_train,
                                  ts=ts_train, cs=cs_train,

@@ -1,0 +1,30 @@
+dataset_name: mimic
+axis: 2  # For lambda baseline this has to be 1.
+batch_size: 32
+learning_rate: .01
+log_interval: 100
+weight_decay: 1.e-4
+num_epochs: 100
+output_file: /Users/mariana/Documents/col/lts4/survan/Results/{}/
+landmark: False # Check preprocessed_data below.
+target_lr: .1
+arch:
+  type: transformer
+  arch_kwargs:
+    hidden_size: 16
+    seq_len: 480  # Has to be the same as the horizon
+    output_dim: 16
+    num_layers: 2
+    dropout: 0.2
+
+preprocessed_data: False  # In the case of the NASA dataset, this should be True if we want to use landmarking or any lambda value.
+# ckpt_path: /Users/mariana/Documents/projects/Huawei/Results/SA/big_rw/transformer/lambda_0.0/landmark_False/seed_{}
+dataset_kwargs:
+  horizon: 480
+  data_path: /Users/mariana/Documents/col/lts4/SurvanData/mimic_iv/mimic.h5
+
+lambda_: .95
+num_steps: 5
+verbose: True
+stratify: True
+ddh_hidden_size: 32

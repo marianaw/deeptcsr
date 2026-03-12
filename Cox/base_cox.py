@@ -247,7 +247,10 @@ class BaseSA:
                 y, m, _ = get_targets_and_masks(
                     X, ts, cs, self.config.landmark)
             else:
-                X, y, m = batch
+                if len(batch) == 3:
+                    X, y, m = batch
+                else:
+                    X, _, cs, y, m, h_ws = batch
 
             X, y, m = convert_to_jax_arrays(X, y, m)
 
@@ -276,7 +279,10 @@ class BaseSA:
                 y, m, _ = get_targets_and_masks(
                     X, ts, cs, self.config.landmark)
             else:
-                X, y, m = batch
+                if len(batch) == 3:
+                    X, y, m = batch
+                else:
+                    X, _, cs, y, m, h_ws = batch
 
             X, y, m = convert_to_jax_arrays(X, y, m)
 

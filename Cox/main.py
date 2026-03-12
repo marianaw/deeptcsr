@@ -81,7 +81,7 @@ if __name__ == '__main__':
         else:
             train_gen, test_gen, val_gen = gens
 
-        agent.train(train_gen)
+        agent.train(train_gen, val_gen=val_gen)
         agent.save()
         agent.eval(test_gen, suffix='test')
         if val_gen is not None:

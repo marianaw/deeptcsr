@@ -1,0 +1,24 @@
+defaults:
+  - dataset: nasa
+  - backbone: transformer
+  - algorithm: cox
+  - _self_
+
+seed: 0
+test_size: 0.2
+val_size: 0.2
+data_root: data
+output_dir: outputs
+
+# resolved output path matches the legacy directory layout so the
+# plotting script (and notebook) globbing patterns keep working
+run_dir: ${output_dir}/${algorithm.name}/${dataset.name}/${backbone.name}/lambda_${algorithm.lambda_}/target_lr_${algorithm.target_lr}/landmark_${dataset.landmark}/seed_${seed}
+
+hydra:
+  run:
+    dir: ${run_dir}
+  sweep:
+    dir: ${output_dir}/_sweep
+    subdir: ${algorithm.name}/${dataset.name}/${backbone.name}/lambda_${algorithm.lambda_}/target_lr_${algorithm.target_lr}/landmark_${dataset.landmark}/seed_${seed}
+  job:
+    chdir: false

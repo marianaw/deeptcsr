@@ -1,0 +1,9 @@
+name: pbc2
+data_path: ${data_root}/pbc-seqs.pkl
+horizon: 16
+landmark: true
+stratify: false
+batch_size: 128
+learning_rate: 0.1
+weight_decay: 1.0e-4
+num_epochs: 100

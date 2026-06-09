@@ -1,0 +1,9 @@
+name: churn_lastfm_months
+data_path: ${data_root}/lastfm-dataset-1K
+horizon: 226
+landmark: true
+stratify: true
+batch_size: 128
+learning_rate: 0.01
+weight_decay: 1.0e-4
+num_epochs: 100

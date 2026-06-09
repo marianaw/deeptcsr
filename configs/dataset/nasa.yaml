@@ -1,0 +1,9 @@
+name: nasa
+data_path: ${data_root}/NASA.h5
+horizon: 363
+landmark: false
+stratify: true
+batch_size: 64
+learning_rate: 0.01
+weight_decay: 1.0e-4
+num_epochs: 100

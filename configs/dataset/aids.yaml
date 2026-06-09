@@ -1,0 +1,9 @@
+name: aids
+data_path: ${data_root}/aids-seqs.pkl
+horizon: 5
+landmark: true
+stratify: false
+batch_size: 128
+learning_rate: 0.1
+weight_decay: 0.0
+num_epochs: 100

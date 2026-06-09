@@ -44,7 +44,7 @@ class DDHConfig:
     num_epochs: int = 50
     hidden_size: int = 128
     test_size: float = 0.20
-    val_size: float = 0.20
+    val_size: float | None = 0.20
     axis: int = 2
     seed: int = 0
     log_interval: int = 1
@@ -73,6 +73,9 @@ class DDHConfig:
         warmup_epochs = raw.get("warmup_epochs", cls.warmup_epochs)
         early_stopping_patience = raw.get("early_stopping_patience", cls.early_stopping_patience)
 
+        raw_val_size = raw.get("val_size", cls.val_size)
+        val_size = None if raw_val_size in (None, 0, 0.0) else float(raw_val_size)
+
         return cls(
             dataset_name=raw["dataset_name"],
             dataset_kwargs=raw["dataset_kwargs"],
@@ -81,7 +84,7 @@ class DDHConfig:
             num_epochs=raw.get("num_epochs", cls.num_epochs),
             hidden_size=hidden_size,
             test_size=raw.get("test_size", cls.test_size),
-            val_size=raw.get("val_size", cls.val_size),
+            val_size=val_size,
             axis=raw.get("axis", cls.axis),
             seed=raw.get("seed", cls.seed),
             log_interval=raw.get("log_interval", cls.log_interval),
@@ -317,19 +320,20 @@ def train(config: DDHConfig) -> Dict[str, Any]:
         batch_size=config.batch_size,
         rng=np.random.default_rng(config.seed),
     )
-    
-    # Create validation data generator for early stopping
-    val_gen = TimesDataGenerator(
-        X=X_val,
-        ts=ts_val,
-        cs=cs_val,
-        y=y_val,
-        mask=m_val,
-        h_ws=hws_val,
-        batch_size=config.batch_size,
-        rng=np.random.default_rng(config.seed),
-        shuffle=False,  # Don't shuffle validation data
-    )
+
+    val_gen = None
+    if config.val_size is not None:
+        val_gen = TimesDataGenerator(
+            X=X_val,
+            ts=ts_val,
+            cs=cs_val,
+            y=y_val,
+            mask=m_val,
+            h_ws=hws_val,
+            batch_size=config.batch_size,
+            rng=np.random.default_rng(config.seed),
+            shuffle=False,
+        )
 
     horizon = config.dataset_kwargs.get("horizon", seqs.shape[1])
     feature_dim = seqs.shape[-1]
@@ -430,50 +434,48 @@ def train(config: DDHConfig) -> Dict[str, Any]:
         ranking_history.append(mean_ranking)
         prediction_history.append(mean_prediction)
 
-        # Compute validation loss for early stopping
-        val_total = []
-        for val_batch in val_gen:
-            val_batch_x, val_batch_ts, val_batch_cs, val_batch_y, val_batch_m, _ = val_batch
-            val_batch_x = jnp.asarray(val_batch_x)
-            val_batch_ts = jnp.asarray(val_batch_ts)
-            val_batch_cs = jnp.asarray(val_batch_cs)
-            val_batch_y = jnp.asarray(val_batch_y)
-            val_batch_m = jnp.asarray(val_batch_m)
+        val_loss = None
+        if val_gen is not None:
+            val_total = []
+            for val_batch in val_gen:
+                val_batch_x, val_batch_ts, val_batch_cs, val_batch_y, val_batch_m, _ = val_batch
+                val_batch_x = jnp.asarray(val_batch_x)
+                val_batch_ts = jnp.asarray(val_batch_ts)
+                val_batch_cs = jnp.asarray(val_batch_cs)
+                val_batch_y = jnp.asarray(val_batch_y)
+                val_batch_m = jnp.asarray(val_batch_m)
 
-            val_loss_total, _ = loss_fn(
-                params,
-                val_batch_x,
-                val_batch_ts,
-                val_batch_cs,
-                val_batch_y,
-                val_batch_m,
-            )
-            val_total.append(val_loss_total)
-        
-        val_gen.reset()
-        val_loss = float(jnp.mean(jnp.stack(val_total)))
-        
-        # Early stopping logic (with tolerance for floating point precision)
-        improvement_threshold = 1e-4  # Require at least 0.01% improvement
-        if val_loss < (best_val_loss - improvement_threshold):
-            best_val_loss = val_loss
-            patience_counter = 0
-        else:
-            patience_counter += 1
-            
-        # Check if early stopping should be triggered
-        if patience_counter >= config.early_stopping_patience:
-            print(f"Early stopping at epoch {epoch} (patience={config.early_stopping_patience})")
-            break
+                val_loss_total, _ = loss_fn(
+                    params,
+                    val_batch_x,
+                    val_batch_ts,
+                    val_batch_cs,
+                    val_batch_y,
+                    val_batch_m,
+                )
+                val_total.append(val_loss_total)
+
+            val_gen.reset()
+            val_loss = float(jnp.mean(jnp.stack(val_total)))
+
+            improvement_threshold = 1e-4
+            if val_loss < (best_val_loss - improvement_threshold):
+                best_val_loss = val_loss
+                patience_counter = 0
+            else:
+                patience_counter += 1
+
+            if patience_counter >= config.early_stopping_patience:
+                print(f"Early stopping at epoch {epoch} (patience={config.early_stopping_patience})")
+                break
 
         if epoch % config.log_interval == 0 or epoch == 1 or epoch == config.num_epochs:
-            # Get current learning rate
-            current_lr = lr_schedule(global_step - 1)  # -1 because we increment after update
+            current_lr = lr_schedule(global_step - 1)
+            val_str = f"val_loss: {val_loss:.4f} | best_val: {best_val_loss:.4f} | patience: {patience_counter}/{config.early_stopping_patience} | " if val_loss is not None else ""
             print(
                 f"Epoch {epoch:03d} | total: {mean_total:.4f} | "
                 f"hazard: {mean_hazard:.4f} | ranking: {mean_ranking:.4f} | "
-                f"pred: {mean_prediction:.4f} | val_loss: {val_loss:.4f} | "
-                f"best_val: {best_val_loss:.4f} | patience: {patience_counter}/{config.early_stopping_patience} | lr: {current_lr:.6f}"
+                f"pred: {mean_prediction:.4f} | {val_str}lr: {current_lr:.6f}"
             )
 
     test_x = jnp.asarray(X_test)
@@ -503,31 +505,33 @@ def train(config: DDHConfig) -> Dict[str, Any]:
     )
 
     # Val evaluation
-    val_x = jnp.asarray(X_val)
-    val_y = jnp.asarray(y_val)
-    val_m = jnp.asarray(m_val)
+    val_hazard_loss = val_ranking_loss = val_prediction_loss = val_ci = val_ibs = None
+    if config.val_size is not None:
+        val_x = jnp.asarray(X_val)
+        val_y = jnp.asarray(y_val)
+        val_m = jnp.asarray(m_val)
 
-    val_hazard_logits, val_cov_preds = model.apply(params, val_x)
-    val_hazard_loss = float(hazard_loss_from_logits(val_hazard_logits, val_y, val_m))
-    val_ranking_loss = float(
-        ranking_loss_from_logits(
-            val_hazard_logits,
-            jnp.asarray(ts_val),
-            jnp.asarray(cs_val),
-            axis=config.axis,
-            sigma=config.ranking_sigma,
+        val_hazard_logits, val_cov_preds = model.apply(params, val_x)
+        val_hazard_loss = float(hazard_loss_from_logits(val_hazard_logits, val_y, val_m))
+        val_ranking_loss = float(
+            ranking_loss_from_logits(
+                val_hazard_logits,
+                jnp.asarray(ts_val),
+                jnp.asarray(cs_val),
+                axis=config.axis,
+                sigma=config.ranking_sigma,
+            )
         )
-    )
-    val_prediction_loss = float(prediction_loss(val_cov_preds, val_x))
+        val_prediction_loss = float(prediction_loss(val_cov_preds, val_x))
 
-    val_surv = survival_curve_from_logits(val_hazard_logits, axis=config.axis)
-    val_med_times = np.asarray(median_time_from_survival(val_surv))
-    val_ci = float(concordance_index(val_med_times, ts_val, cs_val))
-    val_ibs = integrated_brier_score_numpy(
-        np.asarray(val_surv[:, 1:]),
-        np.asarray(ts_val),
-        np.asarray(cs_val),
-    )
+        val_surv = survival_curve_from_logits(val_hazard_logits, axis=config.axis)
+        val_med_times = np.asarray(median_time_from_survival(val_surv))
+        val_ci = float(concordance_index(val_med_times, ts_val, cs_val))
+        val_ibs = integrated_brier_score_numpy(
+            np.asarray(val_surv[:, 1:]),
+            np.asarray(ts_val),
+            np.asarray(cs_val),
+        )
 
     return {
         "params": params,
@@ -553,6 +557,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train minimal Dynamic-DeepHit baseline.")
     parser.add_argument("--config", type=str, required=True, help="Path to YAML config file.")
     parser.add_argument("--seed", type=int, default=None, help="Seed for the experiment.")
+    parser.add_argument("--val_size", type=lambda x: None if x.lower() in ('none', 'null') else float(x), default=argparse.SUPPRESS, help="Validation set ratio (pass 'none' to skip validation).")
     return parser.parse_args()
 
 
@@ -560,8 +565,10 @@ def main() -> None:
     args = parse_args()
     config = DDHConfig.from_yaml(args.config)
     if args.seed is not None:
-        config.seed = args.seed  # overwrite seed in config
+        config.seed = args.seed
         print(f"Seed: {config.seed}")
+    if hasattr(args, 'val_size'):
+        config.val_size = args.val_size
     
     config.num_epochs = 50
     config.log_interval = 5
@@ -572,11 +579,12 @@ def main() -> None:
     print("Test prediction loss:", f"{results['test_prediction_loss']:.4f}")
     print("Test c-index:", f"{results['test_ci']:.4f}")
     print("Test IBS:", f"{results['test_ibs']:.4f}")
-    print("Val hazard loss:", f"{results['val_hazard_loss']:.4f}")
-    print("Val ranking loss:", f"{results['val_ranking_loss']:.4f}")
-    print("Val prediction loss:", f"{results['val_prediction_loss']:.4f}")
-    print("Val c-index:", f"{results['val_ci']:.4f}")
-    print("Val IBS:", f"{results['val_ibs']:.4f}")
+    if config.val_size is not None:
+        print("Val hazard loss:", f"{results['val_hazard_loss']:.4f}")
+        print("Val ranking loss:", f"{results['val_ranking_loss']:.4f}")
+        print("Val prediction loss:", f"{results['val_prediction_loss']:.4f}")
+        print("Val c-index:", f"{results['val_ci']:.4f}")
+        print("Val IBS:", f"{results['val_ibs']:.4f}")
     path_results = os.path.join('DDH_results', config.dataset_name, f'seed_{config.seed}')
     os.makedirs(path_results, exist_ok=True)
     new_res = {}

@@ -5,7 +5,7 @@ learning_rate: .01
 log_interval: 1000
 weight_decay: 1.e-4
 num_epochs: 100
-output_file: /Users/mariana/Documents/projects/survival_analysis/Results/{}/
+output_file: /Users/mariana/Documents/projects/survival_analysis/survan/Cox/Results/{}/
 landmark: True
 target_lr: .1
 arch:
@@ -21,7 +21,7 @@ preprocessed_data: False
 # ckpt_path: /Users/mariana/Documents/projects/Huawei/Results/SA/big_rw/transformer/lambda_0.0/landmark_False/seed_{}
 dataset_kwargs:
   horizon: 100
-  data_path: /Users/mariana/Documents/projects/survival_analysis/SurvanData/bigrw-seqs-hard.pkl
+  data_path: /Users/mariana/Documents/projects/survival_analysis/SurvanData/bigrw-seqs.pkl
 
 lambda_: 0.9
 num_steps: 5

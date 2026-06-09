@@ -23,7 +23,7 @@ for seed in {0..10}; do
             result="Results/DeepLambdaSA/${DATASET}/${ARCH}/lambda_${lambda}/landmark_True/target_lr_${target_lr}/exp_1/seed_${seed}/results_test.json"
             if [ -f "$result" ]; then echo "Skipping DeepLambdaSA seed=$seed lambda=$lambda target_lr=$target_lr (done)"; continue; fi
             throttle
-            python main.py --seed $seed --config $1 --agent DeepLambdaSA --lambda_ $lambda --target_lr $target_lr --landmark 1 &
+            python main.py --seed $seed --config $1 --agent DeepLambdaSA --lambda_ $lambda --target_lr $target_lr --landmark 1 --val_size 0.2 --size 0.2 &
         done
     done
 done
@@ -36,7 +36,7 @@ for seed in {0..10}; do
         result="Results/SA/${DATASET}/${ARCH}/lambda_${DEF_LAMBDA}/landmark_${landmark_bool}/target_lr_${DEF_TARGET_LR}/exp_1/seed_${seed}/results_test.json"
         if [ -f "$result" ]; then echo "Skipping SA seed=$seed landmark=$landmark (done)"; continue; fi
         throttle
-        python main.py --seed $seed --config $1 --agent SA --landmark $landmark &
+        python main.py --seed $seed --config $1 --agent SA --landmark $landmark --val_size 0.2 --size 0.2 &
     done
 done
 

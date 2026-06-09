@@ -77,14 +77,21 @@ def target_survival_weights(tgt_logits):
 # ---------- hazard / ranking / prediction losses ----------
 
 
-def hazard_bce(logits, targets, mask, weights=None):
-    """Masked (and optionally TC-weighted) BCE over the hazard logits."""
+def hazard_bce(logits, targets, mask, weights=None, mode="mean"):
+    """Masked (and optionally TC-weighted) BCE over the hazard logits.
+
+    mode="mean": average over all elements (Cox / TC-Cox legacy).
+    mode="weighted": divide by the sum of weights (DDH legacy).
+    """
     bce = optax.sigmoid_binary_cross_entropy(logits, targets)
     w = mask.astype(jnp.float32)
     if weights is not None:
         w = w * weights
-    normalizer = jnp.maximum(jnp.sum(w), 1.0)
-    return jnp.sum(bce * w) / normalizer
+    if mode == "mean":
+        return jnp.mean(bce * w)
+    if mode == "weighted":
+        return jnp.sum(bce * w) / jnp.maximum(jnp.sum(w), 1.0)
+    raise ValueError(f"mode must be 'mean' or 'weighted', got {mode!r}")
 
 
 def _hazard_path(logits, axis):

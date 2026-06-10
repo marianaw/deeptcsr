@@ -51,6 +51,13 @@ class DeepTCSRConfig:
     ranking_sigma: float = 1.0
     cov_pred_weight: float = 0.0
     loss_norm: str = "mean"
+    weight_by_h_ws: bool = True  # Cox/TC-Cox use m=h_ws (legacy convention);
+                                 # plain DDH legacy uses mask only (set False).
+                                 # TC paths always use blended soft_w (this flag
+                                 # only affects the lambda_=0 branch).
+    ibs_strict: bool = False  # if False, includes the leading P(T>0)=1 column in
+                              # the IBS (Cox legacy "off-by-one"); True matches
+                              # the DDH legacy convention which drops it.
     axis: int = 2
     num_epochs: int = 100
     batch_size: int = 64
@@ -75,7 +82,8 @@ class DeepTCSR:
             **cfg.backbone_kwargs,
         )
 
-        params = self.backbone.init(self._next_key(), jnp.asarray(sample_x[:1]))
+        params = self.backbone.init(jax.random.PRNGKey(cfg.seed),
+                                    jnp.asarray(sample_x[:1]))
         tgt_params = jax.tree_util.tree_map(jnp.copy, params)
         self._lr_schedule = self._make_schedule()
         opt = optax.adamw(self._lr_schedule, weight_decay=cfg.weight_decay)
@@ -148,7 +156,7 @@ class DeepTCSR:
     def _maybe_soft_targets(self, x, hard_y, h_ws, cs):
         """Blend hard targets with the target network forecast when lambda_>0."""
         if self.cfg.lambda_ <= 0.0:
-            return hard_y, h_ws
+            return hard_y, (h_ws if self.cfg.weight_by_h_ws else None)
         tgt_logits, _ = self.backbone.apply(self.state.tgt_params, x)
         s_ws = target_survival_weights(tgt_logits)
         soft_y = tc_targets(jax.nn.sigmoid(tgt_logits), hard_y,
@@ -201,21 +209,31 @@ class DeepTCSR:
         return history
 
     def _eval_loss(self, gen):
+        """Validation loss = configured loss recipe against hard targets
+        (no soft TC blending). For Cox/TC-Cox this collapses to masked BCE
+        — matching legacy Cox `test_step`. For DDH/TC-DDH this also adds
+        ranking + cov-prediction losses, matching legacy DDH `loss_fn`."""
         losses = []
         for batch in gen:
-            x, ts, cs = (jnp.asarray(batch["X"]),
-                         jnp.asarray(batch["ts"]),
-                         jnp.asarray(batch["cs"]))
+            x = jnp.asarray(batch["X"])
+            ts = jnp.asarray(batch["ts"])
+            cs = jnp.asarray(batch["cs"])
             if "target" in batch:
-                y, h_ws, mask = (jnp.asarray(batch["target"]).astype(jnp.float32),
-                                 jnp.asarray(batch["h_ws"]).astype(jnp.float32),
-                                 jnp.asarray(batch["mask"]).astype(jnp.float32))
+                y = jnp.asarray(batch["target"]).astype(jnp.float32)
+                h_ws = jnp.asarray(batch["h_ws"]).astype(jnp.float32)
+                mask = jnp.asarray(batch["mask"]).astype(jnp.float32)
             else:
                 y, h_ws, mask = self._hard_targets(x, ts, cs)
-            soft_y, soft_w = self._maybe_soft_targets(x, y, h_ws, cs)
-            loss = self._compute_loss(self.state.params, x, soft_y, mask,
-                                      soft_w, ts, cs)
-            losses.append(float(loss))
+            if self.cfg.loss_norm == "mean":
+                # Legacy Cox val: BCE * mask only (no h_ws on val).
+                logits, _ = self.backbone.apply(self.state.params, x)
+                bce = optax.sigmoid_binary_cross_entropy(logits, y)
+                total = jnp.mean(bce * mask)
+            else:
+                w_eval = h_ws if self.cfg.weight_by_h_ws else None
+                total = self._compute_loss(self.state.params, x, y, mask,
+                                           w_eval, ts, cs)
+            losses.append(float(total))
         gen.reset()
         return float(np.mean(losses))
 
@@ -226,12 +244,12 @@ class DeepTCSR:
         return survival_curve(logits, axis=self.cfg.axis)
 
     def evaluate(self, x, ts, cs):
-        """Return (ci, ibs) on a single batch (numpy arrays)."""
+        """Return (ci, ibs) on a single batch."""
         surv = self.survival_curve(x)
         scores = np.asarray(median_survival_time(surv))
         ci = float(concordance_index(scores, ts, cs))
-        ibs = integrated_brier_score_np(
-            np.asarray(surv[:, 1:]), np.asarray(ts), np.asarray(cs))
+        surv_np = np.asarray(surv if not self.cfg.ibs_strict else surv[:, 1:])
+        ibs = integrated_brier_score_np(surv_np, np.asarray(ts), np.asarray(cs))
         return ci, ibs
 
     # ----- I/O -----

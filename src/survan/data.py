@@ -156,14 +156,18 @@ def load_dataset(
 
 
 def train_val_test_split(arrays, ts, cs, seed, test_size, val_size=None, stratify=False):
-    """Stratified (by censoring) or random split. Returns dict keyed by split."""
+    """Stratified (by censoring) or random split. Returns dict keyed by split.
+
+    Uses `np.random.seed(seed)` + `np.random.shuffle` to match the legacy
+    ordering bit-for-bit so historical result paths can be reproduced.
+    """
     n = len(ts)
-    rng = np.random.default_rng(seed)
+    np.random.seed(seed)
     if stratify:
-        idx_pos = np.where(~cs.astype(bool))[0]
-        idx_neg = np.where(cs.astype(bool))[0]
-        rng.shuffle(idx_pos)
-        rng.shuffle(idx_neg)
+        idx_pos = np.where(cs.astype(bool) == False)[0]
+        idx_neg = np.where(cs.astype(bool) == True)[0]
+        np.random.shuffle(idx_pos)
+        np.random.shuffle(idx_neg)
 
         def cut(idx, frac):
             return int(len(idx) * frac)
@@ -177,7 +181,7 @@ def train_val_test_split(arrays, ts, cs, seed, test_size, val_size=None, stratif
         tr = np.concatenate([idx_pos[n_te_p + n_va_p:], idx_neg[n_te_n + n_va_n:]])
     else:
         idx = np.arange(n)
-        rng.shuffle(idx)
+        np.random.shuffle(idx)
         n_te = int(n * test_size)
         n_va = int(n * val_size) if val_size else 0
         te = idx[:n_te]
@@ -203,17 +207,21 @@ def train_val_test_split(arrays, ts, cs, seed, test_size, val_size=None, stratif
 
 
 class BatchIterator:
-    """Yields dict batches. Re-shuffles on every `reset()`."""
+    """Yields dict batches. Re-shuffles on every `reset()`.
+
+    Uses the global `np.random` state for shuffles to bit-match the legacy
+    training trajectory (the legacy generators called `np.random.shuffle`
+    on a per-epoch permutation without a private RNG).
+    """
 
     def __init__(self, arrays: Mapping[str, np.ndarray], batch_size: int,
-                 seed: int = 0, shuffle: bool = True):
+                 shuffle: bool = True):
         self.arrays = {k: v for k, v in arrays.items() if v is not None}
         ref = next(iter(self.arrays.values()))
         self.n = len(ref)
         self.X = self.arrays.get("X", ref)
         self.batch_size = batch_size
         self.shuffle = shuffle
-        self._rng = np.random.default_rng(seed)
         self._gen = self._iter()
 
     def __iter__(self):
@@ -231,7 +239,7 @@ class BatchIterator:
     def _iter(self):
         idx = np.arange(self.n)
         if self.shuffle:
-            self._rng.shuffle(idx)
+            np.random.shuffle(idx)
         for i in range(0, self.n, self.batch_size):
             sl = idx[i:i + self.batch_size]
             yield {k: v[sl] for k, v in self.arrays.items()}

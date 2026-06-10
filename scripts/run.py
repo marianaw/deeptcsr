@@ -12,10 +12,10 @@ from survan.data import BatchIterator, load_dataset, train_val_test_split
 from survan.model import DeepTCSR, DeepTCSRConfig
 
 
-def _make_split_gen(split: dict, batch_size: int, seed: int, shuffle: bool):
+def _make_split_gen(split: dict, batch_size: int, shuffle: bool):
     return BatchIterator(
         {k: v for k, v in split.items() if v is not None},
-        batch_size=batch_size, seed=seed, shuffle=shuffle,
+        batch_size=batch_size, shuffle=shuffle,
     )
 
 
@@ -39,8 +39,8 @@ def main(cfg: DictConfig) -> None:
         stratify=ds.stratify,
     )
 
-    train_gen = _make_split_gen(splits["train"], ds.batch_size, cfg.seed, shuffle=True)
-    val_gen = _make_split_gen(splits["val"], ds.batch_size, cfg.seed, shuffle=False)
+    train_gen = _make_split_gen(splits["train"], ds.batch_size, shuffle=True)
+    val_gen = _make_split_gen(splits["val"], ds.batch_size, shuffle=False)
     test_split = splits["test"]
 
     model_cfg = DeepTCSRConfig(
@@ -58,6 +58,8 @@ def main(cfg: DictConfig) -> None:
         ranking_sigma=cfg.algorithm.get("ranking_sigma", 1.0),
         cov_pred_weight=cfg.algorithm.cov_pred_weight,
         loss_norm=cfg.algorithm.loss_norm,
+        weight_by_h_ws=cfg.algorithm.get("weight_by_h_ws", True),
+        ibs_strict=cfg.algorithm.get("ibs_strict", False),
         seed=cfg.seed,
         verbose=True,
     )

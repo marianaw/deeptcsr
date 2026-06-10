@@ -55,9 +55,6 @@ class DeepTCSRConfig:
                                  # plain DDH legacy uses mask only (set False).
                                  # TC paths always use blended soft_w (this flag
                                  # only affects the lambda_=0 branch).
-    ibs_strict: bool = False  # if False, includes the leading P(T>0)=1 column in
-                              # the IBS (Cox legacy "off-by-one"); True matches
-                              # the DDH legacy convention which drops it.
     axis: int = 2
     num_epochs: int = 100
     batch_size: int = 64
@@ -244,12 +241,17 @@ class DeepTCSR:
         return survival_curve(logits, axis=self.cfg.axis)
 
     def evaluate(self, x, ts, cs):
-        """Return (ci, ibs) on a single batch."""
+        """Return (ci, ibs) on a single batch.
+
+        IBS is computed on ``surv[:, 1:]`` so the horizon index `h=1..t_max`
+        maps to ``surv[:, h-1] = P(T > h)`` rather than the constant
+        ``P(T > 0) = 1`` leading column (a legacy off-by-one).
+        """
         surv = self.survival_curve(x)
         scores = np.asarray(median_survival_time(surv))
         ci = float(concordance_index(scores, ts, cs))
-        surv_np = np.asarray(surv if not self.cfg.ibs_strict else surv[:, 1:])
-        ibs = integrated_brier_score_np(surv_np, np.asarray(ts), np.asarray(cs))
+        ibs = integrated_brier_score_np(np.asarray(surv[:, 1:]),
+                                        np.asarray(ts), np.asarray(cs))
         return ci, ibs
 
     # ----- I/O -----

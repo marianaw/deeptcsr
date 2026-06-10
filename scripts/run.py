@@ -59,7 +59,6 @@ def main(cfg: DictConfig) -> None:
         cov_pred_weight=cfg.algorithm.cov_pred_weight,
         loss_norm=cfg.algorithm.loss_norm,
         weight_by_h_ws=cfg.algorithm.get("weight_by_h_ws", True),
-        ibs_strict=cfg.algorithm.get("ibs_strict", False),
         seed=cfg.seed,
         verbose=True,
     )

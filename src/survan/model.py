@@ -20,7 +20,8 @@ from .data import BatchIterator, get_targets_and_masks, to_jax
 from .losses import (covariate_prediction_loss, hazard_bce, median_survival_time,
                      ranking_loss, survival_curve, target_survival_weights,
                      tc_targets, tc_weights)
-from .metrics import concordance_index, integrated_brier_score_np
+from .metrics import (concordance_index, concordance_index_ipcw,
+                      integrated_brier_score_ipcw, integrated_brier_score_np)
 
 
 @chex.dataclass(frozen=True)
@@ -240,19 +241,24 @@ class DeepTCSR:
         logits, _ = self.backbone.apply(self.state.params, jnp.asarray(x))
         return survival_curve(logits, axis=self.cfg.axis)
 
-    def evaluate(self, x, ts, cs):
-        """Return (ci, ibs) on a single batch.
+    def evaluate(self, x, ts, cs, train_ts=None, train_cs=None):
+        """Return (ci, ci_ipcw, ibs, ibs_ipcw) on a single batch.
 
         IBS is computed on ``surv[:, 1:]`` so the horizon index `h=1..t_max`
         maps to ``surv[:, h-1] = P(T > h)`` rather than the constant
-        ``P(T > 0) = 1`` leading column (a legacy off-by-one).
+        ``P(T > 0) = 1`` leading column (a legacy off-by-one). Pass
+        ``train_ts/train_cs`` to fit the IPCW censoring KM on the training
+        set (recommended for held-out evaluation).
         """
-        surv = self.survival_curve(x)
+        surv = np.asarray(self.survival_curve(x))
         scores = np.asarray(median_survival_time(surv))
+        ts_np, cs_np = np.asarray(ts), np.asarray(cs)
         ci = float(concordance_index(scores, ts, cs))
-        ibs = integrated_brier_score_np(np.asarray(surv[:, 1:]),
-                                        np.asarray(ts), np.asarray(cs))
-        return ci, ibs
+        ci_ipcw = concordance_index_ipcw(scores, ts_np, cs_np, train_ts, train_cs)
+        ibs = integrated_brier_score_np(surv[:, 1:], ts_np, cs_np)
+        ibs_ipcw = integrated_brier_score_ipcw(surv[:, 1:], ts_np, cs_np,
+                                               train_ts, train_cs)
+        return ci, ci_ipcw, ibs, ibs_ipcw
 
     # ----- I/O -----
 

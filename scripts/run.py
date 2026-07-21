@@ -21,6 +21,10 @@ def _make_split_gen(split: dict, batch_size: int, shuffle: bool):
 
 @hydra.main(version_base=None, config_path="../configs", config_name="config")
 def main(cfg: DictConfig) -> None:
+    done = os.path.join(cfg.run_dir, "results_test.json")
+    if os.path.exists(done):
+        print(f"skip (already done): {cfg.run_dir}")
+        return
     print(OmegaConf.to_yaml(cfg))
     ds = cfg.dataset
     seqs, ts, cs, target, h_ws, mask = load_dataset(
@@ -66,22 +70,26 @@ def main(cfg: DictConfig) -> None:
     model = DeepTCSR(model_cfg, sample_x=splits["train"]["X"])
     model.train(train_gen, val_gen=val_gen)
 
-    test_ci, test_ibs = model.evaluate(
-        test_split["X"], test_split["ts"], test_split["cs"])
-    val_ci, val_ibs = model.evaluate(
-        splits["val"]["X"], splits["val"]["ts"], splits["val"]["cs"])
+    tr_ts, tr_cs = splits["train"]["ts"], splits["train"]["cs"]
+    test_ci, test_ci_ipcw, test_ibs, test_ibs_ipcw = model.evaluate(
+        test_split["X"], test_split["ts"], test_split["cs"], tr_ts, tr_cs)
+    val_ci, val_ci_ipcw, val_ibs, val_ibs_ipcw = model.evaluate(
+        splits["val"]["X"], splits["val"]["ts"], splits["val"]["cs"],
+        tr_ts, tr_cs)
 
     out = cfg.run_dir
     os.makedirs(out, exist_ok=True)
-    model.save_results(out, {"split": "test", "ci": test_ci, "bs": test_ibs})
+    model.save_results(out, {"split": "test", "ci": test_ci, "bs": test_ibs,
+                             "ci_ipcw": test_ci_ipcw, "bs_ipcw": test_ibs_ipcw})
     os.rename(os.path.join(out, "results.json"),
               os.path.join(out, "results_test.json"))
-    model.save_results(out, {"split": "val", "ci": val_ci, "bs": val_ibs})
+    model.save_results(out, {"split": "val", "ci": val_ci, "bs": val_ibs,
+                             "ci_ipcw": val_ci_ipcw, "bs_ipcw": val_ibs_ipcw})
     os.rename(os.path.join(out, "results.json"),
               os.path.join(out, "results_val.json"))
     model.save(out)
-    print(f"test ci={test_ci:.4f}  bs={test_ibs:.4f}  | "
-          f"val ci={val_ci:.4f}  bs={val_ibs:.4f}  → {out}")
+    print(f"test ci={test_ci:.4f} ({test_ci_ipcw:.4f} ipcw)  "
+          f"bs={test_ibs:.4f} ({test_ibs_ipcw:.4f} ipcw)  → {out}")
 
 
 if __name__ == "__main__":

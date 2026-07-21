@@ -1,7 +1,12 @@
-name: tc_ddh
-lambda_: 0.9
-target_lr: 0.1
-ranking_weight: 1.0
-ranking_sigma: 1.0
-cov_pred_weight: 0.1
-loss_norm: weighted
+# @package _global_
+defaults:
+  - override /backbone: gru_attn
+
+algorithm:
+  name: tc_ddh
+  lambda_: 0.9
+  target_lr: 0.1
+  ranking_weight: 1.0
+  ranking_sigma: 1.0
+  cov_pred_weight: 0.1
+  loss_norm: weighted

@@ -1,6 +1,11 @@
-name: tc_cox
-lambda_: 0.95
-target_lr: 0.25
-ranking_weight: 0.0
-cov_pred_weight: 0.0
-loss_norm: mean
+# @package _global_
+defaults:
+  - override /backbone: transformer
+
+algorithm:
+  name: tc_cox
+  lambda_: 0.95
+  target_lr: 0.25
+  ranking_weight: 0.0
+  cov_pred_weight: 0.0
+  loss_norm: weighted

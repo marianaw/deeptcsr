@@ -51,6 +51,26 @@ uv run python scripts/make_plots.py --root outputs --out .
 renders `summary_COX.pdf` (Cox vs TC-Cox) and `summary_DDH.pdf` (DDH vs
 TC-DDH) with paired-t significance stars.
 
+## Small-dataset benchmark (fitted TCSR vs Inc-TCSR vs D-TCSR)
+
+The small-data experiments (AIDS, PBC2, small random walk) compare, at
+`lambda_=0` (pure one-step bootstrap targets):
+
+- **Baseline**: landmarking MLE (`algorithm=cox backbone=linear algorithm.loss_norm=mean`)
+- **Fitted TCSR** (Maystre & Russo, reference implementation): `scripts/run_fitted_tcsr.py`
+  (imports the sibling `tdsurv` repo; set `TDSURV_LIB` if it lives elsewhere)
+- **Inc-TCSR**: `algorithm=d_tcsr algorithm.name=inc_tcsr algorithm.target_lr=1.0` —
+  identical to D-TCSR except the target network is synchronized every step (τ=1)
+- **D-TCSR**: `algorithm=d_tcsr algorithm.target_lr=<τ<1>` — τ selected on validation C-index per seed
+
+Build the datasets with `uv run --with pyreadr python scripts/prepare_small_data.py`
+(needs `data/small_datasets/raw/{pbc.rda,aids.rda}`, see the script docstring),
+run everything with `scripts/run_small_data.sh`, and summarize with
+`uv run python scripts/small_data_table.py`.
+
+Note `algorithm.tc=true` enables temporal-consistency bootstrapping explicitly;
+without it, `lambda_=0` means "no TC" (the large-data baselines rely on this).
+
 ## Algorithm matrix
 
 | Algorithm | `lambda_` | `target_lr` | Ranking | Cov-pred | Loss norm |

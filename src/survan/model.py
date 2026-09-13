@@ -48,6 +48,11 @@ class DeepTCSRConfig:
     warmup_epochs: int = 0
     lambda_: float = 0.0
     target_lr: float = 1.0
+    tc: bool | None = None  # None: derive from lambda_ > 0 (legacy behavior).
+                            # Explicit True enables TC bootstrapping even at
+                            # lambda_=0 (pure one-step bootstrap targets, as in
+                            # the small-data TCSR protocol). target_lr=1.0 is
+                            # then Inc-TCSR; target_lr<1 is D-TCSR.
     ranking_weight: float = 0.0
     ranking_sigma: float = 1.0
     cov_pred_weight: float = 0.0
@@ -152,8 +157,9 @@ class DeepTCSR:
                       mask.astype(np.float32))
 
     def _maybe_soft_targets(self, x, hard_y, h_ws, cs):
-        """Blend hard targets with the target network forecast when lambda_>0."""
-        if self.cfg.lambda_ <= 0.0:
+        """Blend hard targets with the target network forecast when TC is on."""
+        use_tc = self.cfg.tc if self.cfg.tc is not None else self.cfg.lambda_ > 0.0
+        if not use_tc:
             return hard_y, (h_ws if self.cfg.weight_by_h_ws else None)
         tgt_logits, _ = self.backbone.apply(self.state.tgt_params, x)
         s_ws = target_survival_weights(tgt_logits)

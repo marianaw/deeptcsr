@@ -37,11 +37,32 @@ def main(cfg: DictConfig) -> None:
               "target": target.astype(np.float32),
               "h_ws": h_ws.astype(np.float32),
               "mask": mask.astype(np.float32)}
-    splits = train_val_test_split(
-        arrays, ts, cs,
-        seed=cfg.seed, test_size=cfg.test_size, val_size=cfg.val_size,
-        stratify=ds.stratify,
-    )
+    if cfg.get("test_seed") is not None:
+        # Learning-curve protocol: test set fixed by test_seed across all
+        # seeds/sizes; the run seed reshuffles the remainder into train/val;
+        # n_train truncates the (shuffled) train pool.
+        s1 = train_val_test_split(
+            arrays, ts, cs, seed=cfg.test_seed, test_size=cfg.test_size,
+            val_size=None, stratify=ds.stratify)
+        rest = s1["train"]
+        arrays2 = {k: rest[k] for k in arrays}
+        val_frac = cfg.val_size / (1.0 - cfg.test_size)
+        s2 = train_val_test_split(
+            arrays2, rest["ts"], rest["cs"], seed=cfg.seed,
+            test_size=val_frac, val_size=None, stratify=ds.stratify)
+        splits = {"train": s2["train"], "val": s2["test"], "test": s1["test"]}
+        if cfg.get("n_train") is not None:
+            n = int(cfg.n_train)
+            avail = len(splits["train"]["ts"])
+            if n > avail:
+                raise ValueError(f"n_train={n} > available train pool {avail}")
+            splits["train"] = {k: v[:n] for k, v in splits["train"].items()}
+    else:
+        splits = train_val_test_split(
+            arrays, ts, cs,
+            seed=cfg.seed, test_size=cfg.test_size, val_size=cfg.val_size,
+            stratify=ds.stratify,
+        )
 
     train_gen = _make_split_gen(splits["train"], ds.batch_size, shuffle=True)
     val_gen = _make_split_gen(splits["val"], ds.batch_size, shuffle=False)
@@ -58,6 +79,7 @@ def main(cfg: DictConfig) -> None:
         batch_size=ds.batch_size,
         lambda_=cfg.algorithm.lambda_,
         target_lr=cfg.algorithm.target_lr,
+        tc=cfg.algorithm.get("tc", None),
         ranking_weight=cfg.algorithm.ranking_weight,
         ranking_sigma=cfg.algorithm.get("ranking_sigma", 1.0),
         cov_pred_weight=cfg.algorithm.cov_pred_weight,

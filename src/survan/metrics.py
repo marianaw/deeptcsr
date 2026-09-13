@@ -38,19 +38,28 @@ def _prep(ts, cs, train_ts, train_cs, surv=None):
 def concordance_index_ipcw(scores, ts, cs, train_ts=None, train_cs=None):
     """Uno's IPCW C-index (sksurv). `scores` follow `concordance_index`
     convention (higher = longer survival); we negate for risk."""
-    train, test, keep, tau, _ = _prep(ts, cs, train_ts, train_cs)
-    est = -np.asarray(scores)[keep]
-    return float(_ci_ipcw(train, test, est, tau=tau)[0])
+    try:
+        train, test, keep, tau, _ = _prep(ts, cs, train_ts, train_cs)
+        est = -np.asarray(scores)[keep]
+        return float(_ci_ipcw(train, test, est, tau=tau)[0])
+    except ValueError:
+        # Degenerate follow-up range (e.g. tiny training subsets in the
+        # learning-curve protocol) — IPCW estimate undefined.
+        return float("nan")
 
 
 def integrated_brier_score_ipcw(surv, ts, cs, train_ts=None, train_cs=None):
     """IPCW IBS (sksurv). `surv` shape (N, T) with column h = P(T > h)."""
-    train, test, _, tau, surv = _prep(ts, cs, train_ts, train_cs, surv)
-    times = np.arange(1, surv.shape[1] + 1, dtype=float)
-    lo = float(test["time"].min())
-    hi = min(float(test["time"].max()), tau)
-    keep_t = (times > lo) & (times < hi)
-    return float(_ibs_ipcw(train, test, surv[:, keep_t], times[keep_t]))
+    try:
+        train, test, _, tau, surv = _prep(ts, cs, train_ts, train_cs, surv)
+        times = np.arange(1, surv.shape[1] + 1, dtype=float)
+        lo = float(test["time"].min())
+        hi = min(float(test["time"].max()), tau)
+        keep_t = (times > lo) & (times < hi)
+        return float(_ibs_ipcw(train, test, surv[:, keep_t], times[keep_t]))
+    except ValueError:
+        # Degenerate follow-up range (see concordance_index_ipcw).
+        return float("nan")
 
 
 def kaplan_meier(ts, cs):

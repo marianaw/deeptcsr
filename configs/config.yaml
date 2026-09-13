@@ -7,6 +7,11 @@ defaults:
 seed: 0
 test_size: 0.2
 val_size: 0.2
+# Learning-curve protocol (small-data experiments): when test_seed is set,
+# the test split is fixed by it (independent of `seed`), and n_train
+# truncates the per-seed shuffled train pool. Both null = legacy behavior.
+test_seed: null
+n_train: null
 data_root: data
 output_dir: outputs
 

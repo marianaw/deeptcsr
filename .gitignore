@@ -165,4 +165,7 @@ multirun/
 
 *.pdf
 !figures/*.pdf
-
+CLAUDE.md
+data/outputs_small/
+outputs*/
+data/

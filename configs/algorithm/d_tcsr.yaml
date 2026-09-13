@@ -1,0 +1,17 @@
+# @package _global_
+# D-TCSR on small datasets: TC bootstrapping with lambda_=0 (pure one-step
+# bootstrap targets) and a delayed target network (target_lr = tau < 1).
+# Inc-TCSR is this same recipe with target_lr=1.0 (override algorithm.name
+# to inc_tcsr so runs aggregate separately).
+defaults:
+  - override /backbone: linear
+
+algorithm:
+  name: d_tcsr
+  tc: true
+  lambda_: 0.0
+  target_lr: 0.25
+  ranking_weight: 0.0
+  cov_pred_weight: 0.0
+  loss_norm: mean
+  weight_by_h_ws: true

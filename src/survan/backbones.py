@@ -75,19 +75,45 @@ def _positional_encoding(seq_len, hidden_size):
     return pe
 
 
-def _transformer_forward(hidden_size, seq_len, horizon, num_layers, dropout, seed):
+def _transformer_forward(hidden_size, seq_len, horizon, num_layers, dropout,
+                         seed, residual=True):
+    """Causal transformer encoder over the state sequence.
+
+    ``residual=True`` uses standard pre-norm blocks (x + attn(norm(x)),
+    x + ffn(norm(x))). The original variant (``residual=False``) overwrote
+    the hidden state at every layer with no skip path, so stacking layers
+    degraded rather than helped -- in the architecture pilot it left the Cox
+    family at chance level on Scania for every width/depth tried.
+    """
     def fwd(x):
         keys = hk.PRNGSequence(seed)
         pe = _positional_encoding(seq_len, hidden_size)
         h = hk.Linear(hidden_size)(x) + pe
-        mask = jnp.tril(jnp.ones((seq_len, seq_len), dtype=jnp.float32))
+        # (1, 1, T, T) so it broadcasts over batch and heads.
+        mask = jnp.tril(jnp.ones((seq_len, seq_len),
+                                 dtype=jnp.float32))[None, None]
         w_init = hk.initializers.VarianceScaling(2 / num_layers)
         for _ in range(num_layers):
-            h = hk.MultiHeadAttention(num_heads=4, key_size=16,
-                                      model_size=hidden_size, w_init=w_init)(h, h, mask)
-            h = hk.LayerNorm(axis=-1, create_scale=True, create_offset=True)(h)
-            h = hk.Linear(hidden_size)(h)
-            h = hk.dropout(next(keys), dropout, h)
+            if residual:
+                a = hk.LayerNorm(axis=-1, create_scale=True,
+                                 create_offset=True)(h)
+                a = hk.MultiHeadAttention(num_heads=4, key_size=16,
+                                          model_size=hidden_size,
+                                          w_init=w_init)(a, a, a, mask=mask)
+                h = h + hk.dropout(next(keys), dropout, a)
+                f = hk.LayerNorm(axis=-1, create_scale=True,
+                                 create_offset=True)(h)
+                f = hk.Linear(hidden_size)(jax.nn.gelu(
+                    hk.Linear(4 * hidden_size)(f)))
+                h = h + hk.dropout(next(keys), dropout, f)
+            else:
+                h = hk.MultiHeadAttention(
+                    num_heads=4, key_size=16, model_size=hidden_size,
+                    w_init=w_init)(h, h, h, mask=mask)
+                h = hk.LayerNorm(axis=-1, create_scale=True,
+                                 create_offset=True)(h)
+                h = hk.Linear(hidden_size)(h)
+                h = hk.dropout(next(keys), dropout, h)
         return hk.Linear(horizon)(h), None
     return fwd
 
@@ -109,7 +135,27 @@ def _linear_forward(feature_dim, horizon):
 
 
 def _gru_attn_forward(hidden_size, horizon, feature_dim,
-                      attention_hidden=None):
+                      attention_hidden=None, causal=True, query_chunk=32):
+    """GRU + temporal attention, Dynamic-DeepHit style.
+
+    Faithful to the reference implementation (chl8856/Dynamic-DeepHit,
+    ``class_DeepLongitudinal.py``): the RNN runs over the measurement
+    history, attention scores are ``e_j = v^T tanh(W_h h_j + W_q x_query)``
+    restricted to actually-measured steps, and the prediction consumes
+    ``[current state, context]``.
+
+    The reference makes ONE prediction, at the last measurement, so its
+    attention over "all history" is causal by construction. TCSR instead
+    needs ``h(k | x_t)`` at EVERY state, so the same mechanism is applied at
+    each landmark t: query is the measurement at t, keys/values are hidden
+    states j < t. With ``causal=False`` the previous behaviour is restored --
+    a context pooled over the whole trajectory and broadcast to every
+    position, which let a prediction at t=0 use the entire future.
+
+    Query positions are processed in chunks of ``query_chunk``: the additive
+    attention needs a (B, chunk, T, att) intermediate, which would be ~2 GB
+    for a full T=363 sequence at batch 64.
+    """
     att_hidden = attention_hidden or hidden_size
 
     def fwd(x):
@@ -118,21 +164,40 @@ def _gru_attn_forward(hidden_size, horizon, feature_dim,
         h = jnp.swapaxes(h, 0, 1)  # (T, B, H)
         core = hk.GRU(hidden_size)
         outputs, _ = hk.dynamic_unroll(core, h, core.initial_state(B))
-        outputs = jnp.swapaxes(outputs, 0, 1)  # (B, T, H)
+        outputs = jnp.swapaxes(outputs, 0, 1)  # (B, T, H); causal in t
 
-        last = jnp.repeat(outputs[:, -1:, :], T, axis=1)
-        att_in = jnp.concatenate([outputs, last], axis=-1)
-        att_scores = hk.Linear(1)(jax.nn.tanh(hk.Linear(att_hidden)(att_in))).squeeze(-1)
+        measured = jnp.any(jnp.abs(x) > 0, axis=-1)  # (B, T) non-padding
 
-        time_mask = jnp.any(jnp.abs(x) > 0, axis=-1)
-        time_mask = time_mask.at[:, -1].set(True)
-        att_scores = jnp.where(time_mask, att_scores, -1e9)
-        att = jax.nn.softmax(att_scores, axis=1)
+        if not causal:
+            last = jnp.repeat(outputs[:, -1:, :], T, axis=1)
+            att_in = jnp.concatenate([outputs, last], axis=-1)
+            att_scores = hk.Linear(1)(
+                jax.nn.tanh(hk.Linear(att_hidden)(att_in))).squeeze(-1)
+            tm = measured.at[:, -1].set(True)
+            att_scores = jnp.where(tm, att_scores, -1e9)
+            att = jax.nn.softmax(att_scores, axis=1)
+            context = jnp.sum(att[:, :, None] * outputs, axis=1)
+            context = jnp.repeat(context[:, None, :], T, axis=1)
+        else:
+            keys = hk.Linear(att_hidden)(outputs)   # W_h h_j
+            query = hk.Linear(att_hidden)(x)        # W_q x_t (current measurement)
+            score = hk.Linear(1)                    # shared across chunks
+            idx = jnp.arange(T)
+            parts = []
+            for s0 in range(0, T, query_chunk):
+                sl = slice(s0, min(s0 + query_chunk, T))
+                e = score(jnp.tanh(keys[:, None, :, :]
+                                   + query[:, sl][:, :, None, :])).squeeze(-1)
+                allowed = (idx[None, :] < idx[sl][:, None])[None]  # j < t
+                allowed = allowed & measured[:, None, :]
+                e = jnp.where(allowed, e, -1e9)
+                a = jax.nn.softmax(e, axis=-1)
+                # t with no admissible history (t=0) gets a zero context
+                a = jnp.where(jnp.any(allowed, axis=-1, keepdims=True), a, 0.0)
+                parts.append(jnp.einsum("bct,bth->bch", a, outputs))
+            context = jnp.concatenate(parts, axis=1)  # (B, T, H)
 
-        context = jnp.sum(att[:, :, None] * outputs, axis=1)
-        context = jnp.repeat(context[:, None, :], T, axis=1)
         fused = jnp.concatenate([outputs, context], axis=-1)
-
         hazard_logits = hk.Linear(horizon)(fused)
         cov_preds = hk.Linear(feature_dim)(outputs)
         return hazard_logits, cov_preds
@@ -163,6 +228,7 @@ def build_backbone(name, horizon, feature_dim, seed, **kwargs):
             num_layers=kwargs.get("num_layers", 3),
             dropout=kwargs.get("dropout", 0.2),
             seed=seed,
+            residual=kwargs.get("residual", True),
         )
     elif name == "gru_attn":
         fwd = _gru_attn_forward(
@@ -170,6 +236,7 @@ def build_backbone(name, horizon, feature_dim, seed, **kwargs):
             horizon=horizon,
             feature_dim=feature_dim,
             attention_hidden=kwargs.get("attention_hidden"),
+            causal=kwargs.get("causal", True),
         )
     else:
         raise ValueError(f"Unknown backbone {name!r}")

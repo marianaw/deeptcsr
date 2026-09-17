@@ -33,10 +33,12 @@ def main(cfg: DictConfig) -> None:
         compute_targets=True,
         kwargs={"data_path": ds.data_path, "horizon": ds.horizon},
     )
+    # target stays float32; h_ws/mask stay bool (4x smaller) — the model
+    # casts per-batch, so training numerics are unchanged.
     arrays = {"X": seqs.astype(np.float32),
               "target": target.astype(np.float32),
-              "h_ws": h_ws.astype(np.float32),
-              "mask": mask.astype(np.float32)}
+              "h_ws": h_ws,
+              "mask": mask}
     if cfg.get("test_seed") is not None:
         # Learning-curve protocol: test set fixed by test_seed across all
         # seeds/sizes; the run seed reshuffles the remainder into train/val;
@@ -71,7 +73,10 @@ def main(cfg: DictConfig) -> None:
     model_cfg = DeepTCSRConfig(
         horizon=ds.horizon,
         feature_dim=seqs.shape[-1],
-        backbone=cfg.backbone.name,
+        # `name` labels the run directory; `arch` (when given) selects the
+        # factory. Splitting them lets a sweep vary capacity without runs
+        # overwriting each other's results under one shared path.
+        backbone=cfg.backbone.get("arch", cfg.backbone.name),
         backbone_kwargs=OmegaConf.to_container(cfg.backbone.kwargs, resolve=True),
         learning_rate=ds.learning_rate,
         weight_decay=ds.weight_decay,

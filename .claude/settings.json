@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(runpodctl ssh info *)",
+      "Bash(runpodctl user)",
+      "Bash(runpodctl user *)",
+      "Bash(runpodctl gpu list)",
+      "Bash(runpodctl gpu list *)",
+      "Bash(runpodctl pod list)",
+      "Bash(runpodctl pod list *)"
+    ]
+  }
+}

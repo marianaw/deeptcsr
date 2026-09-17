@@ -21,18 +21,20 @@ def _pad_to(x, shape):
     a1, a2 = x.shape
     b1, b2 = shape
     assert b2 >= a2 and b1 >= a1
-    res = np.hstack((x, np.zeros((a1, b2 - a2))))
-    res = np.vstack((res, np.zeros((b1 - a1, b2))))
+    res = np.hstack((x, np.zeros((a1, b2 - a2), dtype=x.dtype)))
+    res = np.vstack((res, np.zeros((b1 - a1, b2), dtype=x.dtype)))
     return res
 
 
 def _single_target_and_mask(seq, t, c, landmark=False):
+    # float32/bool throughout: the values are exact 0/1, and float64
+    # intermediates quadruple peak memory on big_rw (n=10k, h=100).
     h, _ = seq.shape
-    target = np.zeros((h, h))
-    h_ws = np.ones((h, h))
+    target = np.zeros((h, h), dtype=np.float32)
+    h_ws = np.ones((h, h), dtype=np.float32)
     mask = np.ones_like(target)
     if not c:  # event observed within horizon
-        target = np.eye(t)[::-1]
+        target = np.eye(t, dtype=np.float32)[::-1]
         target = _pad_to(target, shape=(h, h))
         if landmark:
             tt = t.item() if isinstance(t, np.ndarray) else t
@@ -41,7 +43,7 @@ def _single_target_and_mask(seq, t, c, landmark=False):
                 mask[t:, :] = 0
         else:
             t_aux = min(t, seq.shape[0])
-            h_ws = _pad_to(np.ones((1, t_aux)), shape=(h, h))
+            h_ws = _pad_to(np.ones((1, t_aux), dtype=np.float32), shape=(h, h))
             mask[1:, :] = 0
     return target, h_ws, mask
 
@@ -126,6 +128,7 @@ _LOADERS = {
     "pbc2": _load_pickle,
     "big_rw": _load_pickle,
     "rw": _load_pickle,
+    "scania": _load_pickle,
     "churn_lastfm_months": _load_lastfm_months,
     "nasa": lambda **kw: _load_h5(**kw, normalize=False),
     "mimic": lambda **kw: _load_h5(**kw, normalize=True),

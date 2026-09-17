@@ -183,18 +183,29 @@ def _gru_attn_forward(hidden_size, horizon, feature_dim,
             query = hk.Linear(att_hidden)(x)        # W_q x_t (current measurement)
             score = hk.Linear(1)                    # shared across chunks
             idx = jnp.arange(T)
+
+            # hk.remat is load-bearing, not an optimisation: without it
+            # autodiff keeps every chunk's (B, chunk, T, att) intermediate for
+            # the backward pass, so peak memory is the full (B, T, T, att)
+            # tensor and chunking buys nothing (2.9 GB per step at T=363,
+            # B=64 -- enough to OOM a 124 GB box at 20 workers). Recomputing
+            # each chunk in the backward pass keeps one chunk live at a time.
+            def chunk_context(qc, keys, outputs, allowed):
+                e = score(jnp.tanh(keys[:, None, :, :]
+                                   + qc[:, :, None, :])).squeeze(-1)
+                e = jnp.where(allowed, e, -1e9)
+                a = jax.nn.softmax(e, axis=-1)
+                # a landmark with no admissible history (t=0) gets zero context
+                a = jnp.where(jnp.any(allowed, axis=-1, keepdims=True), a, 0.0)
+                return jnp.einsum("bct,bth->bch", a, outputs)
+
+            chunk_context = hk.remat(chunk_context)
             parts = []
             for s0 in range(0, T, query_chunk):
                 sl = slice(s0, min(s0 + query_chunk, T))
-                e = score(jnp.tanh(keys[:, None, :, :]
-                                   + query[:, sl][:, :, None, :])).squeeze(-1)
                 allowed = (idx[None, :] < idx[sl][:, None])[None]  # j < t
                 allowed = allowed & measured[:, None, :]
-                e = jnp.where(allowed, e, -1e9)
-                a = jax.nn.softmax(e, axis=-1)
-                # t with no admissible history (t=0) gets a zero context
-                a = jnp.where(jnp.any(allowed, axis=-1, keepdims=True), a, 0.0)
-                parts.append(jnp.einsum("bct,bth->bch", a, outputs))
+                parts.append(chunk_context(query[:, sl], keys, outputs, allowed))
             context = jnp.concatenate(parts, axis=1)  # (B, T, H)
 
         fused = jnp.concatenate([outputs, context], axis=-1)

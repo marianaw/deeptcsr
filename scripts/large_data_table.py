@@ -33,7 +33,7 @@ from scipy import stats
 
 from aggregate import collect
 
-DATASETS = ["nasa", "mimic", "churn_lastfm_months", "big_rw"]
+DATASETS = ["nasa", "scania", "churn_lastfm_months", "big_rw"]
 SELECTIONS = {"test_ci": ("val_ci", True), "test_bs": ("val_bs", False)}
 LABELS = {
     "cox": "Cox (baseline)", "inc_tc_cox": "Inc-TCSR Cox", "tc_cox": "D-TCSR Cox",

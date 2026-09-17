@@ -131,7 +131,6 @@ _LOADERS = {
     "scania": _load_pickle,
     "churn_lastfm_months": _load_lastfm_months,
     "nasa": lambda **kw: _load_h5(**kw, normalize=False),
-    "mimic": lambda **kw: _load_h5(**kw, normalize=True),
 }
 
 

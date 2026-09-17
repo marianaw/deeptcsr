@@ -21,6 +21,7 @@ from .losses import (covariate_prediction_loss, hazard_bce, median_survival_time
                      ranking_loss, survival_curve, target_survival_weights,
                      tc_targets, tc_weights)
 from .metrics import (concordance_index, concordance_index_ipcw,
+                      td_brier_score, td_concordance_index,
                       integrated_brier_score_ipcw, integrated_brier_score_np)
 
 
@@ -265,6 +266,73 @@ class DeepTCSR:
         ibs_ipcw = integrated_brier_score_ipcw(surv[:, 1:], ts_np, cs_np,
                                                train_ts, train_cs)
         return ci, ci_ipcw, ibs, ibs_ipcw
+
+    def evaluate_landmarks(self, x, ts, cs, landmarks, horizons=None,
+                           train_ts=None, train_cs=None):
+        """Dynamic-DeepHit style evaluation on a landmark x horizon grid.
+
+        At landmark ``t_M`` the model's hazard row ``logits[:, t_M, :]`` is
+        already the distribution conditional on surviving to ``t_M``, so the
+        risk within ``delta`` steps is ``1 - prod_{k<=delta}(1 - h_k)`` --
+        the same quantity the reference computes by renormalising its
+        cumulative incidence over ``[t_M, t_M + delta]``.
+
+        Only subjects still at risk at ``t_M`` are scored, with time measured
+        forward from the landmark. Horizons default to the 25/50/75th
+        percentiles of remaining time among at-risk TRAINING subjects, the
+        generic analogue of the reference's domain-chosen 1/3/5/10-year
+        windows. Returns ``{(t_M, delta): {...metrics...}}``.
+        """
+        logits, _ = self.backbone.apply(self.state.params, jnp.asarray(x))
+        haz = np.asarray(jax.nn.sigmoid(logits))
+        ts, cs = np.asarray(ts), np.asarray(cs).astype(bool)
+        tr_ts = np.asarray(train_ts) if train_ts is not None else None
+        tr_cs = np.asarray(train_cs).astype(bool) if train_cs is not None else None
+
+        out = {}
+        for t_m in landmarks:
+            t_m = int(t_m)
+            if t_m >= haz.shape[1]:
+                continue
+            at_risk = ts > t_m
+            if at_risk.sum() < 10:
+                continue
+            rem = (ts - t_m)[at_risk]
+            rem_cs = cs[at_risk]
+            # Survival from the landmark, accumulated in log space and in
+            # float64: a plain cumprod underflows to 0.0 at long horizons, so
+            # every subject's risk ties at exactly 1.0 and the C(t)-index
+            # collapses to 0 from ties rather than from bad ranking.
+            h_lm = np.clip(haz[at_risk, t_m, :].astype(np.float64), 0.0, 1 - 1e-12)
+            surv = np.exp(np.cumsum(np.log1p(-h_lm), axis=1))
+
+            tr_rem = tr_cs_r = None
+            if tr_ts is not None:
+                tr_at_risk = tr_ts > t_m
+                if tr_at_risk.sum() >= 10:
+                    tr_rem = (tr_ts - t_m)[tr_at_risk]
+                    tr_cs_r = tr_cs[tr_at_risk]
+
+            if horizons is None:
+                base = tr_rem if tr_rem is not None else rem
+                hs = np.unique(np.percentile(base, [25, 50, 75]).astype(int))
+                hs = [h for h in hs if 1 <= h <= surv.shape[1]]
+            else:
+                hs = [int(h) for h in horizons if 1 <= h <= surv.shape[1]]
+
+            for d in hs:
+                risk = 1.0 - surv[:, d - 1]
+                out[(t_m, d)] = {
+                    "n_at_risk": int(at_risk.sum()),
+                    "n_events_by_h": int(((rem <= d) & ~rem_cs).sum()),
+                    "td_ci": td_concordance_index(risk, rem, rem_cs, d),
+                    "td_bs": td_brier_score(risk, rem, rem_cs, d),
+                    "td_ci_ipcw": td_concordance_index(risk, rem, rem_cs, d,
+                                                       tr_rem, tr_cs_r),
+                    "td_bs_ipcw": td_brier_score(risk, rem, rem_cs, d,
+                                                 tr_rem, tr_cs_r),
+                }
+        return out
 
     # ----- I/O -----
 

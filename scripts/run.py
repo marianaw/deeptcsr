@@ -90,6 +90,7 @@ def main(cfg: DictConfig) -> None:
         cov_pred_weight=cfg.algorithm.cov_pred_weight,
         loss_norm=cfg.algorithm.loss_norm,
         weight_by_h_ws=cfg.algorithm.get("weight_by_h_ws", True),
+        early_stopping_patience=ds.get('patience', 5),
         seed=cfg.seed,
         verbose=True,
     )

@@ -36,11 +36,11 @@ from aggregate import collect
 DATASETS = ["nasa", "scania", "churn_lastfm_months", "big_rw"]
 SELECTIONS = {"test_ci": ("val_ci", True), "test_bs": ("val_bs", False)}
 LABELS = {
-    "cox": "Cox (baseline)", "inc_tc_cox": "Inc-TCSR Cox", "tc_cox": "D-TCSR Cox",
+    "cox": "LH (baseline)", "inc_tc_cox": "Inc-TCSR LH", "tc_cox": "D-TCSR LH",
     "ddh": "DDH (baseline)", "inc_tc_ddh": "Inc-TCSR DDH", "tc_ddh": "D-TCSR DDH",
 }
-FAMILIES = {"cox": ["cox", "inc_tc_cox", "tc_cox"],
-            "ddh": ["ddh", "inc_tc_ddh", "tc_ddh"]}
+FAMILIES = {"LH": ["cox", "inc_tc_cox", "tc_cox"],
+            "DDH": ["ddh", "inc_tc_ddh", "tc_ddh"]}
 
 
 def _num(path_part, key):

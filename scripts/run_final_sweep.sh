@@ -46,7 +46,8 @@ fi
 DATA_ROOT=${DATA_ROOT:-/workspace/SurvanData}
 OUTPUT_DIR=${OUTPUT_DIR:-outputs_final}
 NWORKERS=${NWORKERS:-28}
-NWORKERS_BIGRW=${NWORKERS_BIGRW:-12}
+NWORKERS_NASA=${NWORKERS_NASA:-10}
+NWORKERS_BIGRW=${NWORKERS_BIGRW:-6}
 EPOCHS=${EPOCHS:-1000}
 COX_H=${COX_H:-128}; COX_L=${COX_L:-2}; DDH_H=${DDH_H:-64}
 
@@ -57,8 +58,9 @@ gen_cmds() {  # $1 = "main" (all but big_rw) or "big_rw"
 python3 - "$1" "$COX_ARCH" "$DDH_ARCH" <<'EOF'
 import sys
 which, cox_arch, ddh_arch = sys.argv[1], sys.argv[2], sys.argv[3]
-DATASETS = ["big_rw"] if which == "big_rw" else ["nasa", "scania",
-                                                 "churn_lastfm_months"]
+GROUPS = {"light": ["scania", "churn_lastfm_months"],
+          "nasa": ["nasa"], "big_rw": ["big_rw"]}
+DATASETS = GROUPS[which]
 LAMBDAS = [0.1, 0.5, 0.95]   # 0.8 dropped to cut the sweep by a quarter
 TAUS = [0.05, 0.1, 0.25]
 
@@ -94,11 +96,19 @@ run_phase() {  # $1 = command list, $2 = workers
   wait
 }
 
-main_cmds=$(gen_cmds main)
+# Phases are sized by MEMORY WEIGHT, not by dataset count. The container is
+# capped at 64 GB (cgroup) even though `free` reports the host's 755 GB, and
+# NASA is the heavy case: horizon 363 makes the causal attention tensor and
+# the (n,363,363) targets large, so it needs far fewer concurrent workers.
+# Running the light datasets at full width first keeps throughput up.
+light_cmds=$(gen_cmds light)
+nasa_cmds=$(gen_cmds nasa)
 bigrw_cmds=$(gen_cmds big_rw)
 echo "arch: transformer h=$COX_H l=$COX_L | gru_attn h=$DDH_H | epochs<=$EPOCHS"
-echo "phase 1: $(echo "$main_cmds" | wc -l) runs at $NWORKERS workers"
-run_phase "$main_cmds" "$NWORKERS"
-echo "phase 2 (big_rw): $(echo "$bigrw_cmds" | wc -l) runs at $NWORKERS_BIGRW workers"
+echo "phase 1 (scania+lastfm): $(echo "$light_cmds" | wc -l) runs at $NWORKERS workers"
+run_phase "$light_cmds" "$NWORKERS"
+echo "phase 2 (nasa): $(echo "$nasa_cmds" | wc -l) runs at $NWORKERS_NASA workers"
+run_phase "$nasa_cmds" "$NWORKERS_NASA"
+echo "phase 3 (big_rw): $(echo "$bigrw_cmds" | wc -l) runs at $NWORKERS_BIGRW workers"
 run_phase "$bigrw_cmds" "$NWORKERS_BIGRW"
 echo "done: $(find $OUTPUT_DIR -name results_test.json | wc -l) results"

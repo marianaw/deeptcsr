@@ -51,12 +51,15 @@ def load(root=Path("outputs_final")):
     return pd.DataFrame(flat), pd.DataFrame(land)
 
 
+from selection import pick_global
+
+
 def pick(df, keys, val_col, test_col, maximize):
-    """Best validation config per key-group; returns one row per seed."""
-    d = df.dropna(subset=[val_col, test_col])
-    idx = (d.groupby(keys)[val_col].idxmax() if maximize
-           else d.groupby(keys)[val_col].idxmin())
-    return d.loc[idx]
+    """One config per (algorithm, dataset[, ...]) on MEAN validation across
+    seeds -- not a different winner per seed. `keys` may still contain
+    "seed"; it is dropped, since seeds are what we average over."""
+    keys = [k for k in keys if k != "seed"]
+    return pick_global(df, keys, val_col, test_col, maximize)
 
 
 def cell(g, col):
@@ -83,14 +86,20 @@ def main():
                     r[LABEL[ds]] = cell(sel[(sel.algorithm == a) & (sel.dataset == ds)], metric)
                 rows.append(r)
             print(pd.DataFrame(rows).to_string(index=False))
-            inc, dt = algos[1], algos[2]
+            # D-TCSR is tested against BOTH references: beating Inc-TCSR
+            # means little if the untreated baseline is better still.
+            base, inc, dt = algos
             for ds in DS:
+                bas = sel[(sel.algorithm == base) & (sel.dataset == ds)].set_index("seed")[metric]
                 a = sel[(sel.algorithm == inc) & (sel.dataset == ds)].set_index("seed")[metric]
                 b = sel[(sel.algorithm == dt) & (sel.dataset == ds)].set_index("seed")[metric]
                 c = a.index.intersection(b.index)
-                if len(c) > 1:
-                    p = stats.ttest_rel(b.loc[c], a.loc[c]).pvalue
-                    print(f"   {LABEL[ds]:9s} D-TCSR − Inc = {(b.loc[c]-a.loc[c]).mean():+.4f}  p={p:.4f}")
+                cb = bas.index.intersection(b.index)
+                if len(c) > 1 and len(cb) > 1:
+                    p1 = stats.ttest_rel(b.loc[c], a.loc[c]).pvalue
+                    p2 = stats.ttest_rel(b.loc[cb], bas.loc[cb]).pvalue
+                    print(f"   {LABEL[ds]:9s} D-TCSR vs Inc = {(b.loc[c]-a.loc[c]).mean():+.4f} p={p1:.4f}"
+                          f"   |  vs baseline = {(b.loc[cb]-bas.loc[cb]).mean():+.4f} p={p2:.4f}")
 
     # --- DDH protocol: landmark x horizon, time-dependent C-index ---
     sel = pick(land, ["algorithm", "dataset", "seed", "landmark", "horizon"],

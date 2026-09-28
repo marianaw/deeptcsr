@@ -75,9 +75,14 @@ def agg(subs, algos, metric, higher_better=True):
     """subs: list of per-group DataFrames.
     -> means (n,3), sems (n,3), markers (n,) for D-TCSR vs Inc-TCSR.
 
-    Markers are DIRECTION-AWARE: asterisks mean D-TCSR is significantly
-    BETTER; a significant loss is marked "†" instead, so a star can never be
-    read as a win when the metric is one where lower is better."""
+    Markers are DIRECTION-AWARE and BASELINE-AWARE:
+      */**/***  D-TCSR significantly better than Inc-TCSR AND at least as
+                good as the baseline -- an unambiguous win.
+      o         significantly better than Inc-TCSR but BELOW the baseline;
+                an improvement over Inc-TCSR that is not a win overall.
+      †         significantly WORSE than Inc-TCSR.
+    Without the baseline check a star can decorate a cell where both TC
+    variants trail the untreated baseline."""
     m = np.full((len(subs), 3), np.nan)
     s = np.full((len(subs), 3), np.nan)
     sig = []
@@ -89,7 +94,7 @@ def agg(subs, algos, metric, higher_better=True):
                 m[r, c] = g[metric].mean()
                 s[r, c] = stats.sem(g[metric]) if len(g) > 1 else np.nan
                 per[a] = g.set_index("seed")[metric]
-        inc, dt = algos[1], algos[2]
+        base, inc, dt = algos[0], algos[1], algos[2]
         mark = ""
         if inc in per and dt in per:
             common = per[inc].index.intersection(per[dt].index)
@@ -97,16 +102,30 @@ def agg(subs, algos, metric, higher_better=True):
                 diff = (per[dt].loc[common] - per[inc].loc[common]).mean()
                 pv = stats.ttest_rel(per[dt].loc[common], per[inc].loc[common]).pvalue
                 better = diff > 0 if higher_better else diff < 0
-                mark = stars(pv) if better else ("\u2020" if pv < 0.05 else "")
+                if better:
+                    st = stars(pv)
+                    # also require D-TCSR to hold up against the BASELINE
+                    beats_base = True
+                    if st and base in per:
+                        cb = per[base].index.intersection(per[dt].index)
+                        if len(cb) > 1:
+                            db = (per[dt].loc[cb] - per[base].loc[cb]).mean()
+                            beats_base = db > 0 if higher_better else db < 0
+                    mark = st if beats_base else "\u25cb"
+                else:
+                    mark = "\u2020" if pv < 0.05 else ""
         sig.append(mark)
     return m, s, sig
 
 
+from selection import pick_global
+
+
 def pick(df, keys, val_col, test_col, maximize):
-    d = df.dropna(subset=[val_col, test_col])
-    idx = (d.groupby(keys)[val_col].idxmax() if maximize
-           else d.groupby(keys)[val_col].idxmin())
-    return d.loc[idx]
+    """Config chosen once on mean validation across seeds (and across
+    landmark cells), then reported on test -- see scripts/selection.py."""
+    keys = [k for k in keys if k not in ("seed", "landmark", "horizon")]
+    return pick_global(df, keys, val_col, test_col, maximize)
 
 
 def fig_tcsr(flat, family, out):
@@ -123,7 +142,8 @@ def fig_tcsr(flat, family, out):
     fig.legend(h, [f"{family} {a}" for a in l], loc="lower center", ncol=3,
                bbox_to_anchor=(0.5, -0.04))
     fig.text(0.985, -0.03,
-             "* p<0.05   ** p<0.01   *** p<0.001   \u2020 D-TCSR worse (p<0.05)",
+             "* p<0.05  ** p<0.01  *** p<0.001 (vs Inc-TCSR, and \u2265 baseline)"
+             "   \u25cb beats Inc-TCSR but not baseline   \u2020 worse than Inc-TCSR",
              fontsize=7.5, ha="right", color="0.35")
     fig.tight_layout(rect=[0, 0.06, 1, 1])
     for ext in ("pdf", "png"):
@@ -172,7 +192,8 @@ def fig_landmarks(land, family, out, metric="ci"):
     fig.legend(h, [f"{family} {a}" for a in l], loc="lower center", ncol=3,
                bbox_to_anchor=(0.5, -0.012))
     fig.text(0.985, -0.005,
-             "* p<0.05   ** p<0.01   *** p<0.001   \u2020 D-TCSR worse (p<0.05)",
+             "* p<0.05  ** p<0.01  *** p<0.001 (vs Inc-TCSR, and \u2265 baseline)"
+             "   \u25cb beats Inc-TCSR but not baseline   \u2020 worse than Inc-TCSR",
              fontsize=7.5, ha="right", color="0.35")
     fig.suptitle(f"{family} \u2014 time-dependent {what} by landmark and horizon",
                  fontsize=11, y=1.005)

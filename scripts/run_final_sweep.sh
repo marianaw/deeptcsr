@@ -9,7 +9,7 @@
 #   arms per dataset/seed:
 #     cox          baseline, no temporal consistency
 #     inc_tc_cox   Inc-TCSR, tau=1.0,  lambda in {0.1,0.5,0.95}
-#     tc_cox       D-TCSR,   tau in {0.05,0.1,0.25} x same lambdas
+#     tc_cox       D-TCSR,   tau in $TAUS (default 0.05,0.1,0.25) x same lambdas
 #     ddh          baseline
 #     inc_tc_ddh   Inc-TCSR, tau=1.0
 #     tc_ddh       D-TCSR
@@ -49,35 +49,43 @@ NWORKERS=${NWORKERS:-28}
 NWORKERS_NASA=${NWORKERS_NASA:-10}
 NWORKERS_BIGRW=${NWORKERS_BIGRW:-6}
 EPOCHS=${EPOCHS:-1000}
+# tau grid; the original {0.05,0.1,0.25} saturated at its maximum on
+# Scania (70% of seeds) and Large-RW, so the 0.25->1.0 gap is swept too.
+export TAUS=${TAUS:-0.05,0.1,0.25}
 COX_H=${COX_H:-128}; COX_L=${COX_L:-2}; DDH_H=${DDH_H:-64}
 
 COX_ARCH="backbone.kwargs.hidden_size=$COX_H backbone.kwargs.num_layers=$COX_L"
 DDH_ARCH="backbone.kwargs.hidden_size=$DDH_H"
 
 gen_cmds() {  # $1 = "main" (all but big_rw) or "big_rw"
-python3 - "$1" "$COX_ARCH" "$DDH_ARCH" <<'EOF'
-import sys
+TAUS="$TAUS" TAU_ONLY="${TAU_ONLY:-0}" python3 - "$1" "$COX_ARCH" "$DDH_ARCH" <<'EOF'
+import sys, os
 which, cox_arch, ddh_arch = sys.argv[1], sys.argv[2], sys.argv[3]
 GROUPS = {"light": ["scania", "churn_lastfm_months"],
           "nasa": ["nasa"], "big_rw": ["big_rw"]}
 DATASETS = GROUPS[which]
 LAMBDAS = [0.1, 0.5, 0.95]   # 0.8 dropped to cut the sweep by a quarter
-TAUS = [0.05, 0.1, 0.25]
+TAUS = [float(t) for t in __import__('os').environ.get('TAUS', '0.05,0.1,0.25').split(',')]
 
 def emit(ds, seed, algo, arch, **ov):
     ovs = " ".join(f"algorithm.{k}={v}" for k, v in ov.items())
     print(f"uv run python scripts/run.py dataset={ds} algorithm={algo} "
           f"{arch} {ovs} seed={seed}".rstrip())
 
+# TAU_ONLY=1 emits just the D-TCSR tau arms -- used when extending the tau
+# grid, so finished baselines/Inc-TCSR runs are not re-enumerated.
+TAU_ONLY = os.environ.get("TAU_ONLY") == "1"
 for ds in DATASETS:
     for seed in range(10):
-        emit(ds, seed, "cox", cox_arch)                      # Cox baseline
-        emit(ds, seed, "ddh", ddh_arch)                      # DDH baseline
+        if not TAU_ONLY:
+            emit(ds, seed, "cox", cox_arch)                  # Cox baseline
+            emit(ds, seed, "ddh", ddh_arch)                  # DDH baseline
         for lam in LAMBDAS:
-            emit(ds, seed, "tc_cox", cox_arch, name="inc_tc_cox",
-                 lambda_=lam, target_lr=1.0)
-            emit(ds, seed, "tc_ddh", ddh_arch, name="inc_tc_ddh",
-                 lambda_=lam, target_lr=1.0)
+            if not TAU_ONLY:
+                emit(ds, seed, "tc_cox", cox_arch, name="inc_tc_cox",
+                     lambda_=lam, target_lr=1.0)
+                emit(ds, seed, "tc_ddh", ddh_arch, name="inc_tc_ddh",
+                     lambda_=lam, target_lr=1.0)
             for tau in TAUS:
                 emit(ds, seed, "tc_cox", cox_arch, lambda_=lam, target_lr=tau)
                 emit(ds, seed, "tc_ddh", ddh_arch, lambda_=lam, target_lr=tau)

@@ -173,7 +173,9 @@ def td_concordance_index(risk, ts, cs, horizon, train_ts=None, train_cs=None):
     if g is not None:
         w = np.array([(1.0 / _g_at(g, t[i])) ** 2 for i in range(n)])
     a = (t[:, None] < t[None, :]) * w[:, None]
-    q = (risk[:, None] > risk[None, :]).astype(float)
+    # ties count 1/2 (Harrell); the reference counts them 0, which drives
+    # near-constant predictions far below 0.5
+    q = (risk[:, None] > risk[None, :]) + 0.5 * (risk[:, None] == risk[None, :])
     n_t = ((t <= horizon) & (ev == 1))[:, None].astype(float)
     num = float(np.sum(a * n_t * q))
     den = float(np.sum(a * n_t))
@@ -184,16 +186,16 @@ def td_concordance_index(risk, ts, cs, horizon, train_ts=None, train_cs=None):
     return num / den
 
 
-def td_brier_score(risk, ts, cs, horizon, train_ts=None, train_cs=None):
-    """Time-dependent Brier score at `horizon` against the conditional risk."""
+def td_brier_score(risk, ts, cs, horizon, train_ts, train_cs):
+    """IPCW time-dependent Brier score at `horizon` against the conditional
+    risk (reference `weighted_brier_score`). Subjects censored before
+    `horizon` get weight 0; there is deliberately no unweighted variant."""
     risk = np.asarray(risk, dtype=float)
     t = np.asarray(ts, dtype=float)
     ev = (~np.asarray(cs).astype(bool)).astype(float)
-    if len(risk) == 0:
+    if len(risk) == 0 or train_ts is None:
         return float("nan")
     surv_true = (t > horizon).astype(float)
-    if train_ts is None:
-        return float(np.mean((risk - (1.0 - surv_true)) ** 2))
     g = _censoring_km(train_ts, train_cs)
     g2 = _g_at(g, horizon)
     w = np.array([(1.0 - surv_true[i]) * ev[i] / _g_at(g, t[i])

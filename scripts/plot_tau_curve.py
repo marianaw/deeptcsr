@@ -132,7 +132,7 @@ def main():
         print(f"  {LAB[ds]}: landmark t={lm}, horizon Δ={hz}")
     sel = pd.concat(rows)
     make(sel, [("val_td_ci", "test_td_ci", True, "C(t)-index"),
-               ("val_td_bs", "test_td_bs", False, "Brier(t)")],
+               ("val_td_bs_ipcw", "test_td_bs_ipcw", False, "Brier(t)")],
          a.results / "tau_curve_landmark",
          "Metric vs target update rate — DDH protocol at the median landmark, "
          "$\\lambda$ re-tuned per $\\tau$, band = ±1 s.e.")

@@ -76,7 +76,7 @@ def main():
         cell = best_cell(land, ds, "inc_tc_cox", "tc_cox", "test_td_ci")
         for row, (val_col, test_col, mx, ylab) in enumerate(
                 [("val_td_ci", "test_td_ci", True, "C(t)-index"),
-                 ("val_td_bs", "test_td_bs", False, "Brier(t)")]):
+                 ("val_td_bs_ipcw", "test_td_bs_ipcw", False, "Brier(t)")]):
             ax = axes[row][col]
             note = []
             for fam in FAM:

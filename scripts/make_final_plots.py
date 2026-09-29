@@ -159,7 +159,7 @@ def fig_landmarks(land, family, out, metric="ci"):
     val_col, test_col, mx, ylab, what = (
         ("val_td_ci", "test_td_ci", True, "C(t)-index", "C(t)-index")
         if metric == "ci" else
-        ("val_td_bs", "test_td_bs", False, "Brier(t)", "Brier score"))
+        ("val_td_bs_ipcw", "test_td_bs_ipcw", False, "Brier(t)", "Brier score"))
     sel = pick(land, ["algorithm", "dataset", "seed", "landmark", "horizon"],
                val_col, test_col, mx)
     lms = {d: sorted(sel[(sel.dataset == d) & (sel.landmark > 0)].landmark.unique())

@@ -8,13 +8,13 @@ set -e
 cd "$(dirname "$0")/.."
 
 SEEDS="range(0,10)"
-DATASETS="aids,pbc2,rw"
-TAUS="0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95"
+DATASETS=${DATASETS:-aids,pbc2,rw}
+TAUS="0.001,0.003,0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95"
 TEST_SEED=1234
 
 run_size() {
   local n=$1
-  local out=outputs_small/ntrain_$n
+  local out=${OUTPUT_DIR:-outputs_small}/ntrain_$n
   local common=(test_seed=$TEST_SEED n_train=$n output_dir=$out "seed=$SEEDS")
 
   uv run python scripts/run.py -m dataset=$DATASETS algorithm=cox backbone=linear \
@@ -23,6 +23,7 @@ run_size() {
       algorithm.name=inc_tcsr algorithm.target_lr=1.0 $common
   uv run python scripts/run.py -m dataset=$DATASETS algorithm=d_tcsr \
       algorithm.target_lr=$TAUS $common
+  [[ -n $SKIP_FITTED ]] && return  # fitted TCSR (tdsurv) is unaffected by the censoring fix
   for ds in aids pbc2 rw; do
     for seed in $(seq 0 9); do
       uv run python scripts/run_fitted_tcsr.py --dataset $ds --seed $seed \

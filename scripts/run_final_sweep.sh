@@ -51,8 +51,11 @@ NWORKERS_BIGRW=${NWORKERS_BIGRW:-6}
 EPOCHS=${EPOCHS:-1000}
 # tau grid; the original {0.05,0.1,0.25} saturated at its maximum on
 # Scania (70% of seeds) and Large-RW, so the 0.25->1.0 gap is swept too.
-export TAUS=${TAUS:-0.05,0.1,0.25}
-COX_H=${COX_H:-128}; COX_L=${COX_L:-2}; DDH_H=${DDH_H:-64}
+# 1e-3..1e-2 reach the staleness end of the tradeoff (target lag of
+# ~1000 SGD steps); the rest is the grid used for model selection.
+export TAUS=${TAUS:-0.001,0.003,0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95,0.99}
+# same sizes as run_seed_extension.sh and recompute_landmarks.py::ARCH
+COX_H=${COX_H:-64}; COX_L=${COX_L:-2}; DDH_H=${DDH_H:-128}
 
 COX_ARCH="backbone.kwargs.hidden_size=$COX_H backbone.kwargs.num_layers=$COX_L"
 DDH_ARCH="backbone.kwargs.hidden_size=$DDH_H"

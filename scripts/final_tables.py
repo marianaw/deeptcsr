@@ -14,7 +14,7 @@ Hyper-parameters (lambda, and tau for D-TCSR) are selected on VALIDATION,
 separately per reported metric, never on test.
 """
 from __future__ import annotations
-import json
+import json, os
 from pathlib import Path
 import numpy as np, pandas as pd
 from scipy import stats
@@ -28,7 +28,7 @@ NAME = {"cox": "baseline", "inc_tc_cox": "Inc-TCSR", "tc_cox": "D-TCSR",
         "ddh": "baseline", "inc_tc_ddh": "Inc-TCSR", "tc_ddh": "D-TCSR"}
 
 
-def load(root=Path("outputs_final")):
+def load(root=Path(os.environ.get("OUTPUT_DIR", "outputs_final"))):
     flat, land = [], []
     for f in root.rglob("results_test.json"):
         p = f.parts
@@ -47,7 +47,8 @@ def load(root=Path("outputs_final")):
             land.append({**key, "landmark": k[0], "horizon": k[1],
                          "n_at_risk": lt[k]["n_at_risk"],
                          "val_td_ci": lv[k]["td_ci"], "test_td_ci": lt[k]["td_ci"],
-                         "val_td_bs": lv[k]["td_bs"], "test_td_bs": lt[k]["td_bs"]})
+                         "val_td_bs_ipcw": lv[k]["td_bs_ipcw"],
+                         "test_td_bs_ipcw": lt[k]["td_bs_ipcw"]})
     return pd.DataFrame(flat), pd.DataFrame(land)
 
 

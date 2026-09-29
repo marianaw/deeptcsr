@@ -4,7 +4,7 @@ One config per (algorithm, dataset) per metric, chosen on MEAN validation
 across seeds -- standard practice, see scripts/selection.py. Both protocols
 are covered, each tuned on its own validation metric:
   TCSR protocol -> val_ci / val_bs
-  DDH protocol  -> mean val_td_ci / val_td_bs over landmark cells
+  DDH protocol  -> mean val_td_ci / val_td_bs_ipcw over landmark cells
 The union is written to results/final/selected_configs.csv and is what the
 extra seeds run.
 """
@@ -28,7 +28,7 @@ for val, test, mx in [("val_ci", "test_ci", True), ("val_bs", "test_bs", False)]
 land = pd.read_csv(R / "all_landmarks.csv")
 land = land[(land.landmark > 0) & land.algorithm.isin(ALG)]
 for val, test, mx in [("val_td_ci", "test_td_ci", True),
-                      ("val_td_bs", "test_td_bs", False)]:
+                      ("val_td_bs_ipcw", "test_td_bs_ipcw", False)]:
     s = pick_global(land, ["algorithm", "dataset"], val, test, mx)
     rows.append(s[["algorithm", "dataset", "lambda_", "target_lr"]]
                 .drop_duplicates().assign(basis=val))

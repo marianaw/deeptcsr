@@ -114,6 +114,7 @@ cmd_push() {
   (cd $LOCAL_DATA && rsync -rltzR --progress -e "ssh $SSH_OPTS -p $PORT" \
       NASA.h5 bigrw-seqs.pkl mimic_iv/mimic.h5 \
       lastfm-dataset-1K/surv_logs_last.csv lastfm-dataset-1K/events.csv \
+      scania/scania-seqs-h100.pkl \
       "$TARGET:$DATA_DIR/")
 }
 

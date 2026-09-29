@@ -9,23 +9,23 @@ by every run. Recomputed offline from the saved model.pkl -- no retraining.
 Writes landmarks_fixed_{test,val}.json next to each run's results.
 """
 from __future__ import annotations
-import json, pickle
+import json, os, pickle
 from pathlib import Path
 import numpy as np, yaml, jax, jax.numpy as jnp
 from survan.data import load_dataset, train_val_test_split
 from survan.backbones import build_backbone
 from survan.metrics import td_concordance_index, td_brier_score
 
-ROOT = Path("outputs_final")
-DATA_ROOT = "../SurvanData"
+ROOT = Path(os.environ.get("OUTPUT_DIR", "outputs_final"))  # one path component
+DATA_ROOT = os.environ.get("DATA_ROOT", "../SurvanData")
 ARCH = {"transformer": dict(hidden_size=64, num_layers=2),
         "gru_attn": dict(hidden_size=128, attention_hidden=16)}
 
 
 def dataset_cfg(name):
     c = yaml.safe_load(open(f"configs/dataset/{name}.yaml"))
-    path = c["data_path"].replace("${data_root}",
-                                  "data" if name == "scania" else DATA_ROOT)
+    # same data_root for every dataset, as the sweep passes it
+    path = c["data_path"].replace("${data_root}", DATA_ROOT)
     return c, path
 
 
@@ -106,7 +106,6 @@ def main():
                     rows.append({"landmark": int(lm), "horizon": int(d),
                                  "n_at_risk": int(ar.sum()),
                                  "td_ci": td_concordance_index(risk, rem, rem_cs, d),
-                                 "td_bs": td_brier_score(risk, rem, rem_cs, d),
                                  "td_ci_ipcw": td_concordance_index(risk, rem, rem_cs, d, trm, trc),
                                  "td_bs_ipcw": td_brier_score(risk, rem, rem_cs, d, trm, trc)})
             json.dump(rows, open(mp.parent / f"landmarks_fixed_{split}.json", "w"))

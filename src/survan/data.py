@@ -36,15 +36,19 @@ def _single_target_and_mask(seq, t, c, landmark=False):
     if not c:  # event observed within horizon
         target = np.eye(t, dtype=np.float32)[::-1]
         target = _pad_to(target, shape=(h, h))
-        if landmark:
-            tt = t.item() if isinstance(t, np.ndarray) else t
-            if tt <= h:
-                h_ws = np.tril(np.ones_like(target), -(h - t))[::-1]
-                mask[t:, :] = 0
-        else:
-            t_aux = min(t, seq.shape[0])
-            h_ws = _pad_to(np.ones((1, t_aux), dtype=np.float32), shape=(h, h))
-            mask[1:, :] = 0
+    # Weights/mask apply to censored subjects too (TCSR Eq. 1, w_nk = 1{t_n >= k};
+    # tdsurv `_targets`): under ts = n_steps - censored, a censored subject is
+    # known to survive exactly as far as an event subject with the same ts, and
+    # states from ts on have no observed successor.
+    if landmark:
+        tt = t.item() if isinstance(t, np.ndarray) else t
+        if tt <= h:
+            h_ws = np.tril(np.ones_like(target), -(h - t))[::-1]
+            mask[t:, :] = 0
+    else:
+        t_aux = min(t, seq.shape[0])
+        h_ws = _pad_to(np.ones((1, t_aux), dtype=np.float32), shape=(h, h))
+        mask[1:, :] = 0
     return target, h_ws, mask
 
 

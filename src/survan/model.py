@@ -157,17 +157,18 @@ class DeepTCSR:
                       h_ws.astype(np.float32),
                       mask.astype(np.float32))
 
-    def _maybe_soft_targets(self, x, hard_y, h_ws, cs):
+    def _maybe_soft_targets(self, x, hard_y, h_ws, cs, ts):
         """Blend hard targets with the target network forecast when TC is on."""
         use_tc = self.cfg.tc if self.cfg.tc is not None else self.cfg.lambda_ > 0.0
         if not use_tc:
             return hard_y, (h_ws if self.cfg.weight_by_h_ws else None)
         tgt_logits, _ = self.backbone.apply(self.state.tgt_params, x)
         s_ws = target_survival_weights(tgt_logits)
+        cs = cs.astype(bool)
         soft_y = tc_targets(jax.nn.sigmoid(tgt_logits), hard_y,
-                            self.cfg.lambda_, self.cfg.horizon)
+                            self.cfg.lambda_, self.cfg.horizon, cs, ts)
         soft_w = tc_weights(s_ws, h_ws, hard_y, cs,
-                            self.cfg.lambda_, self.cfg.horizon)
+                            self.cfg.lambda_, self.cfg.horizon, ts)
         return soft_y, soft_w
 
     # ----- training -----
@@ -188,7 +189,7 @@ class DeepTCSR:
                                      jnp.asarray(batch["mask"]).astype(jnp.float32))
                 else:
                     y, h_ws, mask = self._hard_targets(x, ts, cs)
-                soft_y, soft_w = self._maybe_soft_targets(x, y, h_ws, cs)
+                soft_y, soft_w = self._maybe_soft_targets(x, y, h_ws, cs, ts)
                 self.state, loss = self._update(
                     self.state, x, soft_y, mask, soft_w, ts, cs)
                 losses.append(float(loss))
@@ -230,10 +231,10 @@ class DeepTCSR:
             else:
                 y, h_ws, mask = self._hard_targets(x, ts, cs)
             if self.cfg.loss_norm == "mean":
-                # Legacy Cox val: BCE * mask only (no h_ws on val).
+                # h_ws drops horizons past the event/censoring time.
                 logits, _ = self.backbone.apply(self.state.params, x)
                 bce = optax.sigmoid_binary_cross_entropy(logits, y)
-                total = jnp.mean(bce * mask)
+                total = jnp.mean(bce * mask * h_ws)
             else:
                 w_eval = h_ws if self.cfg.weight_by_h_ws else None
                 total = self._compute_loss(self.state.params, x, y, mask,
@@ -326,7 +327,6 @@ class DeepTCSR:
                     "n_at_risk": int(at_risk.sum()),
                     "n_events_by_h": int(((rem <= d) & ~rem_cs).sum()),
                     "td_ci": td_concordance_index(risk, rem, rem_cs, d),
-                    "td_bs": td_brier_score(risk, rem, rem_cs, d),
                     "td_ci_ipcw": td_concordance_index(risk, rem, rem_cs, d,
                                                        tr_rem, tr_cs_r),
                     "td_bs_ipcw": td_brier_score(risk, rem, rem_cs, d,

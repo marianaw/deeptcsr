@@ -437,14 +437,14 @@ def main() -> None:
     source_files = {
         "train_operational_readouts.csv": {
             "path": str(args.readouts),
-            "download_url": f"{SOURCE_BASE}?filePath=train_operational_readouts.csv",
+            "download_url": f"{SOURCE_BASE}/train_operational_readouts.csv",
             "bytes": args.readouts.stat().st_size,
             "sha256": sha256(args.readouts),
             "schema": readout_schema,
         },
         "train_tte.csv": {
             "path": str(args.tte),
-            "download_url": f"{SOURCE_BASE}?filePath=train_tte.csv",
+            "download_url": f"{SOURCE_BASE}/train_tte.csv",
             "bytes": args.tte.stat().st_size,
             "sha256": sha256(args.tte),
             "schema": tte_schema,

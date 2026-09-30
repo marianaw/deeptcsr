@@ -166,9 +166,12 @@ multirun/
 *.pdf
 !figures/*.pdf
 CLAUDE.md
+.claude/
 data/outputs_small/
 data/scania_component_x_v3/
 results/scania_component_x/
 outputs*/
 data/
 .claude/
+.runpod_pod*
+docs/

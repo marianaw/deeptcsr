@@ -10,6 +10,10 @@
 # though `free` reports the host's RAM, and each run needs ~2.8 GB.
 set -e
 cd "$(dirname "$0")/.."
+# XLA sizes its thread pools by the CPUs it can see; on a big shared host
+# (256 cores) that is ~900 threads per run and exhausts the pod's pids limit.
+# Children inherit this shell's affinity; the pod's CPU quota is time-based.
+taskset -cp 0-$(( ${PIN_CPUS:-32} - 1 )) $$ >/dev/null 2>&1 || true
 export PATH=$HOME/.local/bin:$PATH
 export PYTHONUNBUFFERED=1
 if [[ "${SINGLE_THREAD:-1}" == "1" ]]; then

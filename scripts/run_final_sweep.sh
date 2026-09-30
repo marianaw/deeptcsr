@@ -35,6 +35,10 @@
 #      COX_H, COX_L (transformer hidden/layers), DDH_H (gru_attn hidden).
 set -e
 cd "$(dirname "$0")/.."
+# XLA sizes its thread pools by the CPUs it can see; on a big shared host
+# (256 cores) that is ~900 threads per run and exhausts the pod's pids limit.
+# Children inherit this shell's affinity; the pod's CPU quota is time-based.
+taskset -cp 0-$(( ${PIN_CPUS:-32} - 1 )) $$ >/dev/null 2>&1 || true
 export PATH=$HOME/.local/bin:$PATH
 export PYTHONUNBUFFERED=1
 if [[ "${SINGLE_THREAD:-1}" == "1" ]]; then
@@ -112,9 +116,11 @@ run_phase() {  # $1 = command list, $2 = workers
 # NASA is the heavy case: horizon 363 makes the causal attention tensor and
 # the (n,363,363) targets large, so it needs far fewer concurrent workers.
 # Running the light datasets at full width first keeps throughput up.
-light_cmds=$(gen_cmds light)
-nasa_cmds=$(gen_cmds nasa)
-bigrw_cmds=$(gen_cmds big_rw)
+# ONLY=<dataset> restricts the sweep to one dataset (one pod per dataset).
+only() { grep -E "dataset=(${ONLY:-[a-z_]+}) " || true; }
+light_cmds=$(gen_cmds light | only)
+nasa_cmds=$(gen_cmds nasa | only)
+bigrw_cmds=$(gen_cmds big_rw | only)
 echo "arch: transformer h=$COX_H l=$COX_L | gru_attn h=$DDH_H | epochs<=$EPOCHS"
 echo "phase 1 (scania+lastfm): $(echo "$light_cmds" | wc -l) runs at $NWORKERS workers"
 run_phase "$light_cmds" "$NWORKERS"

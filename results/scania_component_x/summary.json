@@ -7,7 +7,7 @@
     "files": {
       "train_operational_readouts.csv": {
         "path": "data/scania_component_x_v3/train_operational_readouts.csv",
-        "download_url": "https://api.researchdata.se/dataset/2024-34/3/file/data?filePath=train_operational_readouts.csv",
+        "download_url": "https://api.researchdata.se/dataset/2024-34/3/file/data/train_operational_readouts.csv",
         "bytes": 1219209878,
         "sha256": "e01cb0bd87dfab4c9dbad215d51d81282fc0d413be96d6f819ea872fb7a3c715",
         "schema": {
@@ -235,7 +235,7 @@
       },
       "train_tte.csv": {
         "path": "data/scania_component_x_v3/train_tte.csv",
-        "download_url": "https://api.researchdata.se/dataset/2024-34/3/file/data?filePath=train_tte.csv",
+        "download_url": "https://api.researchdata.se/dataset/2024-34/3/file/data/train_tte.csv",
         "bytes": 345412,
         "sha256": "d8c2379ed7c95a575dd869730b2b3b96d660317f49e57de300518ff3b08d53a5",
         "schema": {

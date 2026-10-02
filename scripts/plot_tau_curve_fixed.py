@@ -92,8 +92,8 @@ def main():
                     ax.axhline(bm, color=colour, ls=":", lw=1.1, alpha=0.7)
                 note.append(nseed)
             ax.set_xscale("log")
-            ax.set_xticks([0.05, 0.1, 0.25, 0.5, 1.0])
-            ax.set_xticklabels(["0.05", "0.1", "0.25", "0.5", "1.0\n(Inc)"])
+            ax.set_xticks([0.001, 0.01, 0.1, 1.0])
+            ax.set_xticklabels(["0.001", "0.01", "0.1", "1.0\n(Inc)"])
             ax.grid(axis="y", ls="--", alpha=0.35, lw=0.6); ax.set_axisbelow(True)
             ax.legend(fontsize=7, loc="best")
             if col == 0:

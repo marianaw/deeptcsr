@@ -1,0 +1,57 @@
+ algorithm             dataset  lambda_  target_lr                                  basis
+       cox              big_rw     0.00      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+       cox churn_lastfm_months     0.00      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+       cox                nasa     0.00      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+       cox              scania     0.00      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+       ddh              big_rw     0.00      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+       ddh churn_lastfm_months     0.00      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+       ddh                nasa     0.00      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+       ddh              scania     0.00      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+inc_tc_cox              big_rw     0.10      1.000                         val_td_bs_ipcw
+inc_tc_cox              big_rw     0.50      1.000                                 val_ci
+inc_tc_cox              big_rw     0.95      1.000                       val_bs|val_td_ci
+inc_tc_cox churn_lastfm_months     0.95      1.000 val_bs|val_ci|val_td_bs_ipcw|val_td_ci
+inc_tc_cox                nasa     0.10      1.000                                 val_ci
+inc_tc_cox                nasa     0.95      1.000        val_bs|val_td_bs_ipcw|val_td_ci
+inc_tc_cox              scania     0.50      1.000                                 val_ci
+inc_tc_cox              scania     0.95      1.000        val_bs|val_td_bs_ipcw|val_td_ci
+inc_tc_ddh              big_rw     0.10      1.000                                 val_bs
+inc_tc_ddh              big_rw     0.95      1.000        val_ci|val_td_bs_ipcw|val_td_ci
+inc_tc_ddh churn_lastfm_months     0.10      1.000                         val_td_bs_ipcw
+inc_tc_ddh churn_lastfm_months     0.50      1.000                          val_bs|val_ci
+inc_tc_ddh churn_lastfm_months     0.95      1.000                              val_td_ci
+inc_tc_ddh                nasa     0.10      1.000                                 val_ci
+inc_tc_ddh                nasa     0.50      1.000                         val_td_bs_ipcw
+inc_tc_ddh                nasa     0.95      1.000                       val_bs|val_td_ci
+inc_tc_ddh              scania     0.50      1.000                          val_bs|val_ci
+inc_tc_ddh              scania     0.95      1.000               val_td_bs_ipcw|val_td_ci
+    tc_cox              big_rw     0.10      0.050                                 val_ci
+    tc_cox              big_rw     0.10      0.100                                 val_bs
+    tc_cox              big_rw     0.10      0.950                         val_td_bs_ipcw
+    tc_cox              big_rw     0.50      0.100                              val_td_ci
+    tc_cox churn_lastfm_months     0.50      0.050                                 val_bs
+    tc_cox churn_lastfm_months     0.95      0.010                                 val_ci
+    tc_cox churn_lastfm_months     0.95      0.050               val_td_bs_ipcw|val_td_ci
+    tc_cox                nasa     0.95      0.050                       val_ci|val_td_ci
+    tc_cox                nasa     0.95      0.100                         val_td_bs_ipcw
+    tc_cox                nasa     0.95      0.500                                 val_bs
+    tc_cox              scania     0.50      0.050                                 val_bs
+    tc_cox              scania     0.95      0.001                                 val_ci
+    tc_cox              scania     0.95      0.010               val_td_bs_ipcw|val_td_ci
+    tc_ddh              big_rw     0.10      0.001                                 val_ci
+    tc_ddh              big_rw     0.10      0.750                                 val_bs
+    tc_ddh              big_rw     0.95      0.001                         val_td_bs_ipcw
+    tc_ddh              big_rw     0.95      0.500                              val_td_ci
+    tc_ddh churn_lastfm_months     0.50      0.001                                 val_ci
+    tc_ddh churn_lastfm_months     0.50      0.250                                 val_bs
+    tc_ddh churn_lastfm_months     0.95      0.050               val_td_bs_ipcw|val_td_ci
+    tc_ddh                nasa     0.95      0.003                                 val_ci
+    tc_ddh                nasa     0.95      0.010                              val_td_ci
+    tc_ddh                nasa     0.95      0.050                         val_td_bs_ipcw
+    tc_ddh                nasa     0.95      0.100                                 val_bs
+    tc_ddh              scania     0.50      0.990                                 val_bs
+    tc_ddh              scania     0.95      0.003                              val_td_ci
+    tc_ddh              scania     0.95      0.010                         val_td_bs_ipcw
+    tc_ddh              scania     0.95      0.500                                 val_ci
+
+54 configs x 20 seeds = 1080 runs

@@ -73,8 +73,8 @@ def panel(ax, df, ds, val_col, test_col, maximize, ylabel, extra_keys=()):
             ax.plot([1.0], [m[list(taus).index(1.0)]], marker=marker, ms=8,
                     mfc="none", mec=colour, mew=1.6)
     ax.set_xscale("log")
-    ax.set_xticks([0.05, 0.1, 0.25, 0.5, 1.0])
-    ax.set_xticklabels(["0.05", "0.1", "0.25", "0.5", "1.0\n(Inc)"])
+    ax.set_xticks([0.001, 0.01, 0.1, 1.0])
+    ax.set_xticklabels(["0.001", "0.01", "0.1", "1.0\n(Inc)"])
     ax.grid(axis="y", ls="--", alpha=0.35, lw=0.6)
     ax.set_axisbelow(True)
     if ylabel:

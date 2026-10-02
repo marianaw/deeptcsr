@@ -96,7 +96,8 @@ for grp in light nasa big_rw; do
   case $grp in
     light) w=$NWORKERS ;; nasa) w=$NWORKERS_NASA ;; *) w=$NWORKERS_BIGRW ;;
   esac
-  c=$(gen $grp)
+  # ONLY=<dataset> restricts to one dataset (one pod per dataset)
+  c=$(gen $grp | grep -E "dataset=(${ONLY:-[a-z_]+}) " || true)
   todo=0; have=0
   while IFS= read -r line; do
     [ -z "$line" ] && continue

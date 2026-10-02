@@ -305,7 +305,8 @@ class DeepTCSR:
             # every subject's risk ties at exactly 1.0 and the C(t)-index
             # collapses to 0 from ties rather than from bad ranking.
             h_lm = np.clip(haz[at_risk, t_m, :].astype(np.float64), 0.0, 1 - 1e-12)
-            surv = np.exp(np.cumsum(np.log1p(-h_lm), axis=1))
+            log_s = np.cumsum(np.log1p(-h_lm), axis=1)
+            surv = np.exp(log_s)
 
             tr_rem = tr_cs_r = None
             if tr_ts is not None:
@@ -323,11 +324,12 @@ class DeepTCSR:
 
             for d in hs:
                 risk = 1.0 - surv[:, d - 1]
+                rank = -log_s[:, d - 1]  # same order as risk, no underflow ties
                 out[(t_m, d)] = {
                     "n_at_risk": int(at_risk.sum()),
                     "n_events_by_h": int(((rem <= d) & ~rem_cs).sum()),
-                    "td_ci": td_concordance_index(risk, rem, rem_cs, d),
-                    "td_ci_ipcw": td_concordance_index(risk, rem, rem_cs, d,
+                    "td_ci": td_concordance_index(rank, rem, rem_cs, d),
+                    "td_ci_ipcw": td_concordance_index(rank, rem, rem_cs, d,
                                                        tr_rem, tr_cs_r),
                     "td_bs_ipcw": td_brier_score(risk, rem, rem_cs, d,
                                                  tr_rem, tr_cs_r),

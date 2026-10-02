@@ -1,86 +1,114 @@
-# Final large-benchmark results
+# Final large-benchmark results (v2)
 
-3620 runs = full tuning grid on seeds 0-9 + 30 seeds per winning config, every arm recomputed with
-current code under one protocol. Hyper-parameters (lambda; tau for D-TCSR)
-selected on VALIDATION, separately per reported metric.
+4,040 runs: the full tuning grid on seeds 0–9 (2,960 runs) plus seeds 10–29
+for every selected configuration (1,080 runs). All arms trained and evaluated
+with the same code, under the protocol below. Run outputs (weights, configs,
+per-run metrics) live in `outputs_v2/` (not in git).
 
-Datasets: NASA, Scania, LastFM, Large-RW. MIMIC excluded (12 events,
-0.03 events per horizon bin; per-seed C-index spanned 0.0-1.0).
+Datasets: NASA, Scania, LastFM, Large-RW. Families: Logistic-Hazard (LH,
+transformer 64×2) and DynamicDeepHit (DDH, GRU+attention 128). Arms per family:
+baseline (no TC), Inc-TCSR (τ = 1), D-TCSR (τ < 1).
 
-## Two evaluation protocols
+## What changed since v1 (all v1 numbers are superseded)
 
-* **TCSR protocol** (`results_{test,val}.json`) -- read-out at state 0,
-  global C-index / IBS. Faithful to Maystre & Russo: "landmark" there is a
-  TRAINING scheme (train on unrolled states) and all arms are scored from
-  the initial state.
-* **Dynamic-DeepHit protocol** (`landmarks_fixed_{test,val}.json`) --
-  landmark x horizon grid, conditional risk F(t_M + delta | T > t_M),
-  time-dependent C(t)-index and Brier score, per chl8856/Dynamic-DeepHit.
-  Landmarks are per-dataset constants (0 plus ts quartiles), shared by all
-  seeds so cells are poolable; horizons are quartiles of remaining time.
+1. **Censored subjects were trained as surviving to the horizon** (`data.py`):
+   their weights/mask now stop at the censoring time, matching TCSR Eq. 1 and
+   the reference `tdsurv` implementation. For λ > 0 the TC λ-return no longer
+   bootstraps from padded states past censoring (`losses.py`); the DDH
+   baseline and the validation loss also use these weights.
+   `tests/test_targets_vs_tdsurv.py` checks our targets/weights against
+   `tdsurv` (exact match for λ ∈ {0, 0.5, 0.95, 1}). Every dataset was
+   affected, including Large-RW (censoring at the horizon still mislabelled
+   the last state and the last horizon step).
+2. **Brier(t) is IPCW only.** The unweighted variant counted subjects
+   censored before the horizon as events.
+3. **C(t) ranks by −log S(Δ)** (same order as 1 − S, but no underflow to exact
+   ties at long horizons) and **ties count ½**. NaN now only means "no
+   comparable pair" (2.1% of cells, mostly NASA with 40 test subjects).
+4. **Grid extended** with τ ∈ {1e-3, 3e-3, 1e-2} (staleness end of the
+   tradeoff, for the τ-curve study).
 
-## Hyper-parameter grid and selection
+## Protocols
 
-lambda in {0.1, 0.5, 0.95}; tau in {0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95,
-0.99} for D-TCSR, tau = 1.0 for Inc-TCSR.
+* **TCSR protocol** (`all_runs.csv`): read-out at state 0, global C-index and
+  IBS.
+* **Dynamic-DeepHit protocol** (`all_landmarks.csv`): conditional risk
+  F(t_M + Δ | T > t_M) on a landmark × horizon grid, time-dependent C(t)-index
+  and IPCW Brier(t) (censoring KM fitted on the at-risk training subjects).
+  Only subjects at risk at t_M are scored. Landmarks are dataset-level
+  constants (0 plus quartiles of event/censoring times); horizons are quartiles
+  of the remaining time. The grid is shared by all runs so cells can be pooled.
 
-Selection is done ONCE per (algorithm, dataset, metric) on the mean
-validation score over the TUNING seeds (0-9) -- never per seed, and never
-over a seed set that differs between candidates. The winning config is then
-run to 30 seeds and its mean test score is reported. The selected tau is
-bimodal: slow targets (tau <= 0.1) win 16 selections and near-synchronous
-targets (tau >= 0.95) win 6, with the middle sparse. The tau grid was extended from a
-{0.05,0.1,0.25} maximum after selection saturated at that boundary (70% of
-Scania seeds when tuning LH on IBS). With the gap to 1.0 swept, datasets
-split: Scania LH picks tau=0.9 in 50% of seeds while Large-RW LH picks
-tau=0.05 in 60% -- opposite ends of the stability/staleness tradeoff. The
-extension also flipped Scania LH from -0.0120 (p=0.064) to +0.0171.
+## Grid and selection
 
-## Headline
+λ ∈ {0.1, 0.5, 0.95}; τ ∈ {0.001, 0.003, 0.01, 0.05, 0.1, 0.25, 0.5, 0.75,
+0.9, 0.95, 0.99} for D-TCSR, τ = 1 for Inc-TCSR. Up to 1,000 epochs with
+early stopping on validation loss, identical for every arm.
 
-D-TCSR beats Inc-TCSR in **65 of 68** landmark x horizon cells with
-history (landmark > 0), and is **never significantly worse in any cell**:
+One configuration per (algorithm, dataset, metric) is chosen on the **mean
+validation score over seeds 0–9** (`scripts/selection.py`), never per seed.
+That configuration is then run on seeds 10–29 and **every reported number is
+its mean over seeds 0–29** (± = standard error, n = 30). Selected configs:
+`selected_configs.csv` (54 configs).
 
-| dataset | family | mean d(C(t)) | cells better | stars | sig. worse |
-|---|---|---|---|---|---|
-| NASA     | LH  | +0.3826 | 9/9 | 9 | 0 |
-| NASA     | DDH | +0.1507 | 9/9 | 8 | 0 |
-| Scania   | LH  | +0.0198 | 9/9 | 6 | 0 |
-| Scania   | DDH | +0.0089 | 7/9 | 0 | 0 |
-| LastFM   | LH  | +0.0253 | 8/9 | 4 | 0 |
-| LastFM   | DDH | +0.0904 | 9/9 | 8 | 0 |
-| Large-RW | LH  | +0.0095 | 7/7 | 7 | 0 |
-| Large-RW | DDH | -0.0017 | 0/7 | 0 | 0 |
+## Headline: TCSR protocol, D-TCSR minus Inc-TCSR (paired over 30 seeds)
 
-Totals: D-TCSR better in 58/68 cells, significantly better (and at least as
-good as the untreated baseline) in 42, significantly worse in 0. A "star"
-requires beating BOTH Inc-TCSR and the no-TC baseline.
+| | NASA | Scania | LastFM | Large-RW |
+|---|---|---|---|---|
+| LH C-index | +0.024 | **+0.067** | **+0.011** | **+0.008** |
+| DDH C-index | **+0.018** | **+0.037** | −0.007 | **+0.003** |
+| LH IBS | **−0.201** | **−0.009** | **−0.019** | **−0.004** |
+| DDH IBS | **−0.024** | −0.023 | −0.001 | −0.001 |
 
-Large-RW DDH is the one negative row: with 30 seeds its effect is -0.0017,
-i.e. absent. Report it as such rather than as a marginal win.
+Bold: p < 0.05. D-TCSR is never significantly worse than Inc-TCSR here. LH
+Inc-TCSR on NASA (IBS 0.303 vs ≈0.10 for baseline and D-TCSR) is the clearest
+instance of same-timescale bootstrapping going unstable.
 
-Under the TCSR protocol the IBS comparison agrees (D-TCSR better on all
-four datasets for LH, two of four for DDH), while the state-0 C-index is
-near chance on NASA and Scania -- predicting from a first measurement that
-carries almost no information is genuinely hard, and the pre-fix numbers
-that looked strong there came from leakage.
+## Headline: DDH protocol (landmark > 0 × horizon cells)
 
-## Correctness fixes behind these numbers
+From `win_counts.md` (34 cells per family × metric). D-TCSR vs Inc-TCSR,
+better (significant) / worse (significant):
 
-1. **Causal mask never applied** (transformer): `MultiHeadAttention(a, a, mask)`
-   passed the mask as the *value* tensor. Affected every LH (Cox-family) run ever
-   produced here, legacy included. Fixed to `(a, a, a, mask=mask)`.
-2. **DDH context leaked the future**: a single context pooled over all T
-   steps was broadcast to every position, so a prediction at t=0 used the
-   whole trajectory. Now applies DDH's mechanism per landmark (query = state
-   at t, keys/values = j < t). Verified with a leakage probe.
-3. **Legacy DDH scaled epochs with tau** (`50 * int(1/target_lr)`), giving
-   D-TCSR 2-20x Inc-TCSR's budget. All arms now share one 1000-epoch cap
-   with identical early stopping.
-4. **IBS off-by-one** (pre-existing, commit 6b488da) and **survival
-   underflow** in the landmark risk (plain cumprod -> 0.0 at long horizons,
-   collapsing C(t) to 0 from ties); now accumulated in log space at float64.
-5. `nasa` had `landmark: false`, so the LH family was not landmarking there.
+| | better | worse |
+|---|---|---|
+| LH C(t) | 34 (32) | 0 (0) |
+| DDH C(t) | 32 (27) | 2 (0) |
+| LH Brier(t) | 28 (22) | 6 (0) |
+| DDH Brier(t) | 31 (27) | 3 (3) |
 
-Files: `all_runs.csv` (TCSR protocol), `all_landmarks.csv` (DDH protocol),
-`tables.txt` (rendered tables).
+Inc-TCSR never wins a cell significantly against both other arms.
+
+## Caveats
+
+* **DDH on Scania:** D-TCSR beats Inc-TCSR in 8/9 C(t) cells but the
+  untreated DDH baseline wins most cells (circles "○" in `summary_DDH`):
+  delayed targets repair Inc-TCSR's instability without improving on plain DDH.
+* **Large-RW Brier(t):** smallest gains; D-TCSR is significantly worse than
+  Inc-TCSR in 3/7 DDH cells.
+* **NASA** has 40 test subjects (10–33 at risk at landmarks > 0); some cells
+  have fewer than 30 usable seeds (no comparable pairs).
+* **LastFM:** 12 seed-extension runs of LH λ=0.5, τ=0.05 were OOM-killed on the
+  pod and re-run successfully; no seeds are missing.
+
+## Files
+
+* `all_runs.csv`, `all_landmarks.csv` — every run (both protocols).
+* `tables.txt` — state-0 and landmark tables (`scripts/final_tables.py`).
+* `selected_configs.csv`, `select_configs.txt` — selection (`scripts/select_configs.py`).
+* `win_counts.md` / `.csv` — per-dataset cell wins (`scripts/win_table.py`).
+* Figures (not in git; regenerate locally): `summary_*`
+  (`scripts/make_final_plots.py`), `tau_curve_*` (`scripts/plot_tau_curve*.py`).
+
+## Regenerating
+
+```bash
+OUTPUT_DIR=outputs_v2 DATA_ROOT=data uv run python scripts/recompute_landmarks.py
+OUTPUT_DIR=outputs_v2 uv run python scripts/final_tables.py > results/final/tables.txt
+uv run python scripts/select_configs.py
+uv run python scripts/make_final_plots.py
+uv run python scripts/plot_tau_curve.py && uv run python scripts/plot_tau_curve_fixed.py
+uv run python scripts/win_table.py
+```
+
+Small-data benchmark (PBC2, AIDS, RW; λ = 0, same τ grid, same selection
+rule, 30 seeds): see `results/small_data/`.

@@ -1,9 +1,0 @@
-family,algorithm,dataset,lambda_
-LH,tc_cox,nasa,0.95
-LH,tc_cox,scania,0.95
-LH,tc_cox,churn_lastfm_months,0.95
-LH,tc_cox,big_rw,0.5
-DDH,tc_ddh,nasa,0.95
-DDH,tc_ddh,scania,0.95
-DDH,tc_ddh,churn_lastfm_months,0.95
-DDH,tc_ddh,big_rw,0.95

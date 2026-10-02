@@ -50,6 +50,8 @@ def main():
     # skip finished work so an interrupted pass resumes instead of restarting
     runs = [m for m in runs
             if not (m.parent / "landmarks_fixed_val.json").exists()]
+    # ONLY=<dataset> lets one process per dataset run in parallel
+    runs = [m for m in runs if os.environ.get("ONLY", m.parts[2]) == m.parts[2]]
     print(f"{len(runs)} runs to do")
     cur_split = (None, None, None)
     for i, mp in enumerate(runs, 1):
@@ -95,7 +97,8 @@ def main():
                     continue
                 rem, rem_cs = (st - lm)[ar], sc[ar]
                 h = np.clip(haz[ar, lm, :].astype(np.float64), 0.0, 1 - 1e-12)
-                surv = np.exp(np.cumsum(np.log1p(-h), axis=1))
+                log_s = np.cumsum(np.log1p(-h), axis=1)
+                surv = np.exp(log_s)
                 tar = tr_ts > lm
                 trm = (tr_ts - lm)[tar] if tar.sum() >= 10 else None
                 trc = tr_cs[tar] if tar.sum() >= 10 else None
@@ -103,10 +106,13 @@ def main():
                     if d > surv.shape[1]:
                         continue
                     risk = 1.0 - surv[:, d - 1]
+                    # rank by -log S: same order as 1 - S, but no underflow
+                    # to exact ties when S(d) -> 0 at long horizons
+                    rank = -log_s[:, d - 1]
                     rows.append({"landmark": int(lm), "horizon": int(d),
                                  "n_at_risk": int(ar.sum()),
-                                 "td_ci": td_concordance_index(risk, rem, rem_cs, d),
-                                 "td_ci_ipcw": td_concordance_index(risk, rem, rem_cs, d, trm, trc),
+                                 "td_ci": td_concordance_index(rank, rem, rem_cs, d),
+                                 "td_ci_ipcw": td_concordance_index(rank, rem, rem_cs, d, trm, trc),
                                  "td_bs_ipcw": td_brier_score(risk, rem, rem_cs, d, trm, trc)})
             json.dump(rows, open(mp.parent / f"landmarks_fixed_{split}.json", "w"))
         if i % 50 == 0:

@@ -181,8 +181,6 @@ def td_concordance_index(risk, ts, cs, horizon, train_ts=None, train_cs=None):
     den = float(np.sum(a * n_t))
     if den == 0:
         return float("nan")
-    if np.ptp(risk) == 0:  # all risks tied -> ranking undefined, not zero
-        return float("nan")
     return num / den
 
 

@@ -2,14 +2,15 @@
 
 Layout: ``outputs_small/ntrain_<n>/<algorithm>/<dataset>/...``. Hyper-
 parameters (tau for D-TCSR, l2 for fitted TCSR — both live in the
-``target_lr`` path slot) are selected on validation SEPARATELY per metric:
-best val C-index for the reported test C-index, best (lowest) val IBS for
-the reported test IBS. Test metrics are then averaged across seeds.
+``target_lr`` path slot) are selected on validation SEPARATELY per metric,
+ONCE per (algorithm, dataset, n_train) on the mean over seeds: best val
+C-index for the reported test C-index, best (lowest) val IBS for the
+reported test IBS. That config's test metrics are averaged across seeds.
 
 Writes tidy CSVs under ``results/small_data/`` for later querying:
   - all_runs.csv           every finished run, one row per hyperparameter combo
-  - selected_val_ci.csv    per-seed rows after best-val-CI selection
-  - selected_val_ibs.csv   per-seed rows after best-val-IBS selection
+  - selected_val_ci.csv    per-seed rows of the config chosen on mean val CI
+  - selected_val_ibs.csv   per-seed rows of the config chosen on mean val IBS
   - summary.csv            mean/sem per (dataset, algorithm, n_train, metric)
 
 Usage: uv run python scripts/small_data_table.py [--root outputs_small]
@@ -24,7 +25,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from aggregate import best_val_per_seed, collect
+from aggregate import collect
+from selection import pick_global
 
 ALGOS = ["cox", "tcsr_fitted", "inc_tcsr", "d_tcsr"]
 LABELS = {"cox": "Baseline (landmark MLE)", "tcsr_fitted": "Fitted TCSR",
@@ -45,13 +47,14 @@ def load_all(root: Path) -> pd.DataFrame:
     return df[df.algorithm.isin(ALGOS) & df.dataset.isin(DATASETS)]
 
 
-def select(df: pd.DataFrame, val_metric: str, maximize: bool) -> pd.DataFrame:
-    parts = []
-    for n, g in df.groupby("n_train"):
-        s = best_val_per_seed(g, metric=val_metric, maximize=maximize)
-        s["n_train"] = n
-        parts.append(s)
-    return pd.concat(parts, ignore_index=True)
+def select(df: pd.DataFrame, val_metric: str, test_metric: str,
+           maximize: bool) -> pd.DataFrame:
+    """One config per (algorithm, dataset, n_train), chosen on MEAN validation
+    across seeds; returns that config's rows for every seed (same rule as the
+    large benchmark, scripts/selection.py). Per-seed selection would let each
+    split pick its own winner, i.e. tune the seed."""
+    return pick_global(df, ["algorithm", "dataset", "n_train"],
+                       val_metric, test_metric, maximize)
 
 
 def summarize(selections: dict[str, pd.DataFrame]) -> pd.DataFrame:
@@ -75,7 +78,7 @@ def main():
     args = ap.parse_args()
 
     df = load_all(args.root)
-    selections = {m: select(df, vm, mx)
+    selections = {m: select(df, vm, m, mx)
                   for m, (vm, mx) in SELECTIONS.items()}
     summary = summarize(selections)
 

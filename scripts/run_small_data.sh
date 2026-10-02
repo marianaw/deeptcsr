@@ -13,7 +13,7 @@ taskset -cp 0-$(( ${PIN_CPUS:-32} - 1 )) $$ >/dev/null 2>&1 || true
 
 SEEDS="range(0,10)"
 DATASETS=${DATASETS:-aids,pbc2,rw}
-TAUS="0.001,0.003,0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95"
+TAUS="0.001,0.003,0.01,0.05,0.1,0.25,0.5,0.75,0.9,0.95,0.99"
 TEST_SEED=1234
 
 run_size() {
@@ -37,7 +37,13 @@ run_size() {
 }
 
 for n in 10 20 30 50 75 100; do
-  run_size $n > /tmp/small_data_n$n.log 2>&1 &
+  # SEQUENTIAL=1: one size at a time. Each hydra multirun process grows to
+  # ~4 GB, so six in parallel can exhaust a 32 GB laptop.
+  if [[ -n ${SEQUENTIAL:-} ]]; then
+    run_size $n > /tmp/small_data_n$n.log 2>&1
+  else
+    run_size $n > /tmp/small_data_n$n.log 2>&1 &
+  fi
 done
 wait
 echo "all sizes done"

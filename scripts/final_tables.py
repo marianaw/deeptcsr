@@ -103,7 +103,9 @@ def main():
                           f"   |  vs baseline = {(b.loc[cb]-bas.loc[cb]).mean():+.4f} p={p2:.4f}")
 
     # --- DDH protocol: landmark x horizon, time-dependent C-index ---
-    sel = pick(land, ["algorithm", "dataset", "seed", "landmark", "horizon"],
+    # One config per (algorithm, dataset) on mean val over landmark > 0 cells:
+    # the same rule as select_configs.py (which chose what got 30 seeds).
+    sel = pick(land[land.landmark > 0], ["algorithm", "dataset", "seed"],
                "val_td_ci", "test_td_ci", True)
     for ds in DS:
         sub = sel[sel.dataset == ds]

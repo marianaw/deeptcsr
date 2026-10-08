@@ -33,12 +33,16 @@ balance() {
     "import json,sys; print(json.load(sys.stdin)['clientBalance'])" 2>/dev/null
 }
 
+SYNC_DIRS=${SYNC_DIRS:-outputs_v2 outputs_small_v2}  # first one must exist on the pod
+
 pull_one() {
-  POD_FILE=$1 timeout 1200 bash scripts/runpod_job.sh pull outputs_v2 \
-    > /dev/null 2>&1 || { echo "  pull outputs_v2 from $1 FAILED"; return 1; }
-  # only the pod running PBC2/AIDS has this dir; absence is not an error
-  POD_FILE=$1 timeout 1200 bash scripts/runpod_job.sh pull outputs_small_v2 \
-    > /dev/null 2>&1 || true
+  local first=1 dir
+  for dir in $SYNC_DIRS; do
+    if POD_FILE=$1 timeout 1200 bash scripts/runpod_job.sh pull "$dir" > /dev/null 2>&1; then :
+    elif [ $first = 1 ]; then echo "  pull $dir from $1 FAILED"; return 1
+    fi  # later dirs may not exist on every pod; that is not an error
+    first=0
+  done
 }
 
 pull_all() { for f in $(pods); do pull_one "$f"; done; }

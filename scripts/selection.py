@@ -5,12 +5,11 @@ seeds, then report that configuration's mean test score over every seed it
 was run with.
 
 Two rules matter:
-  * one config per group, not a different winner per seed (per-seed selection
-    lets each split choose from 18 candidates, which is optimistic);
-  * selection averages over a FIXED seed set (0..TUNING_SEEDS-1). Configs that
-    later received the 20-seed extension would otherwise be compared on a
-    30-seed validation mean against 10-seed rivals -- a quieter estimate
-    winning on sample size rather than merit.
+  * one config per group, not a different winner per seed (per-seed
+    selection is optimistic);
+  * selection averages over a fixed seed set (0..TUNING_SEEDS-1), so configs
+    that later received the seed extension are not compared on more seeds
+    than their rivals.
 """
 from __future__ import annotations
 

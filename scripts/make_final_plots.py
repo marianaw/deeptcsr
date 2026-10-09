@@ -9,14 +9,9 @@ Two families, two protocols, one visual language:
   summary_LH_landmarks.pdf  the LH family under the DDH protocol, for the
                         appendix -- same grid, so the two are comparable.
 
-Style follows the existing summary_COX.pdf: grouped bars, SEM whiskers,
-dashed y-grid, significance asterisks for D-TCSR vs Inc-TCSR.
-
-Colour: three series need three hues. Blue is kept from the original figure;
-orange and green are Okabe-Ito values chosen for colour-vision deficiency.
-Each arm also carries a distinct hatch, so identity never rests on colour
-alone (the node palette validator was unavailable here, which makes the
-secondary encoding load-bearing rather than decorative).
+Grouped bars with SEM whiskers and significance asterisks for D-TCSR vs
+Inc-TCSR. Colours are colour-vision-deficiency safe (Okabe-Ito) and every arm
+also has its own hatch.
 """
 from __future__ import annotations
 import argparse

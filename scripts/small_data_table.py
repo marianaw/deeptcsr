@@ -19,14 +19,63 @@ Usage: uv run python scripts/small_data_table.py [--root outputs_small]
 from __future__ import annotations
 
 import argparse
+import json
+import re
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
-from aggregate import collect
 from selection import pick_global
+
+
+_PARTS = ("algorithm", "dataset", "backbone", "lambda_",
+          "target_lr", "landmark", "seed")
+_NUM_FIELDS = {"lambda_", "target_lr", "seed"}
+_PATTERN = re.compile(r"(lambda|target_lr|landmark|seed)_(.+)")
+
+
+def _parse_run_dir(p: Path):
+    rel = p.relative_to(p.parents[6])
+    if len(rel.parts) != len(_PARTS):
+        return None
+    algo, ds, bb = rel.parts[:3]
+    out = {"algorithm": algo, "dataset": ds, "backbone": bb}
+    for raw, key in zip(rel.parts[3:], _PARTS[3:]):
+        m = _PATTERN.fullmatch(raw)
+        if not m:
+            return None
+        k, v = m.groups()
+        k = "lambda_" if k == "lambda" else k
+        out[k] = float(v) if k in _NUM_FIELDS else v
+    out["seed"] = int(out["seed"])
+    return out
+
+
+def _read_split(run: Path, split: str):
+    f = run / f"results_{split}.json"
+    if not f.exists():
+        return None
+    with open(f) as fh:
+        d = json.load(fh)
+    return {f"{split}_{k}": v for k, v in d.items() if k in ("ci", "bs")}
+
+
+def collect(root: Path) -> pd.DataFrame:
+    """Return one row per finished run (val+test pair)."""
+    rows = []
+    for run in root.glob("*/*/*/lambda_*/target_lr_*/landmark_*/seed_*"):
+        meta = _parse_run_dir(run)
+        if meta is None:
+            continue
+        val = _read_split(run, "val")
+        test = _read_split(run, "test")
+        if val is None or test is None:
+            continue
+        rows.append({**meta, **val, **test, "run_dir": str(run)})
+    return pd.DataFrame(rows)
+
 
 ALGOS = ["cox", "tcsr_fitted", "inc_tcsr", "d_tcsr"]
 LABELS = {"cox": "Baseline (landmark MLE)", "tcsr_fitted": "Fitted TCSR",

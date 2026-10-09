@@ -1,7 +1,6 @@
 """Final large-benchmark tables: baseline vs Inc-TCSR vs D-TCSR.
 
-Reads outputs/ (every arm recomputed with current code under one
-protocol) and reports BOTH evaluation protocols:
+Reads outputs/ and reports both evaluation protocols:
 
   * TCSR protocol  -- read-out at state 0, global C-index / IBS. Faithful to
     Maystre & Russo, where "landmark" is a TRAINING scheme and all arms are

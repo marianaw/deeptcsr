@@ -1,10 +1,9 @@
-"""Recompute the DDH-protocol landmark grid on a FIXED per-dataset grid.
+"""Dynamic-DeepHit-protocol evaluation on a fixed per-dataset grid.
 
-The sweep derived landmarks from each seed's own training split, so every
-seed produced a different (landmark, horizon) grid and seeds could not be
-pooled. Dynamic-DeepHit instead uses dataset-level constants (ages 30/40/50
-in the reference), so the faithful analogue is one grid per dataset, shared
-by every run. Recomputed offline from the saved model.pkl -- no retraining.
+As Dynamic-DeepHit uses dataset-level landmarks, the grid is one per dataset
+and shared by every run, so seeds can be pooled: landmarks are 0 and the
+quartiles of the event/censoring times, horizons the quartiles of the
+remaining time. Evaluated from each run's saved model.pkl (no retraining).
 
 Writes landmarks_fixed_{test,val}.json next to each run's results.
 """
@@ -69,8 +68,7 @@ def main():
                                                     "horizon": c["horizon"]})
             cache[ds] = (c, seqs, ts, cs, fixed_grid(np.asarray(ts)), {})
         c, seqs, ts, cs, grid, _ = cache[ds]
-        # only ONE split is held at a time: caching all 10 seeds kept ~10
-        # copies of every dataset's arrays in memory and got the job killed.
+        # one split held at a time, to bound memory
         if cur_split[0] != ds or cur_split[1] != seed:
             cur_split = (ds, seed,
                          train_val_test_split({"X": seqs}, ts, cs, seed=seed,

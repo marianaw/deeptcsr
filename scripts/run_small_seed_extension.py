@@ -3,7 +3,7 @@ configuration selected (on seeds 0..9) by scripts/small_data_table.py, under
 either metric. Same commands as scripts/run_small_data.sh; finished runs are
 skipped by run.py / run_fitted_tcsr.py, so this is safe to re-run.
 
-    uv run python scripts/run_small_seed_extension.py [--root outputs_small_v2] [-j 4]
+    uv run python scripts/run_small_seed_extension.py [--root outputs_small] [-j 4]
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def commands(sel: pd.DataFrame, root: str, data_root: str) -> list[str]:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--results", default="results/small_data", type=Path)
-    ap.add_argument("--root", default="outputs_small_v2")
+    ap.add_argument("--root", default="outputs_small")
     ap.add_argument("--data-root", default="data")
     ap.add_argument("-j", type=int, default=4)
     a = ap.parse_args()

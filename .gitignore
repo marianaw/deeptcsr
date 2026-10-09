@@ -175,3 +175,5 @@ data/
 .claude/
 .runpod_pod*
 docs/
+results/
+*.tex

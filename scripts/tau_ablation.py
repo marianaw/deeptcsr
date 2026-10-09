@@ -1,8 +1,7 @@
 """Stabilizing effect of the target network: tau ablation on random walks.
 
-Reproduces the experiment of the paper's "Stabilizing effect of the target
-network" subsection (originally notebooks/ablation_tau.ipynb, removed in
-48a9591) with the current code:
+Experiment of the paper's "Stabilizing effect of the target network"
+subsection:
 
   * 20-dim Gauss-Markov random walks (tdsurv generator), horizons
     H in {30, 50, 100}; the churn bias is calibrated per H for ~20% censoring.
@@ -14,23 +13,21 @@ network" subsection (originally notebooks/ablation_tau.ipynb, removed in
     model initialization is fixed (seed 42) so the spread across runs comes
     from the training data, as in the original.
 
-  Protocol (environment variables; defaults = main-experiment regime):
+  Protocol (environment variables; defaults = the paper's setting):
     ABL_OUT       output dir                  results/tau_ablation_main
     ABL_LAMBDA    TC lambda                   0.1  (LargeRW D-TCSR selection)
     ABL_NTRAIN    training sequences          1000 (~8 steps per epoch)
     ABL_NVAL      validation sequences        500  (0 = no early stopping)
     ABL_PATIENCE  early-stopping patience     5 epochs
     ABL_EPOCHS    max epochs                  1000
-  Earlier runs: results/tau_ablation (lambda 0, 50 train, no ES, 100 epochs),
-  results/tau_ablation_es (lambda 0, 50 train, 50 val, patience 50),
-  results/tau_ablation_fixed (lambda 0, 50 train, no ES, 1000 epochs).
   * Metrics on the test set (state-0 protocol): C-index and IBS.
   * Variability of the estimates: for every valid test entry (subject i,
     state l, horizon k), mean and std of h_theta(k | x_l) across the 30 runs;
-    delta = std / (h(1-h)) (paper) and std / sqrt(h(1-h)) (dimensionless).
+    delta = std / sqrt(h(1-h)) (used in the paper; figures *_sqrt.png) and
+    std / (h(1-h)) (figures *_paper.png).
 
     uv run python scripts/tau_ablation.py run --horizon 30 --tau 0.1 --run 0
-    uv run python scripts/tau_ablation.py aggregate
+    uv run python scripts/tau_ablation.py aggregate   # metrics.csv, table, figures
 """
 from __future__ import annotations
 
@@ -185,7 +182,7 @@ def aggregate():
             best = means.idxmax() if higher else means.idxmin()
             cells = []
             for tau in p.columns:
-                txt = f"{means[tau]:.2f} $\\pm$ {p[tau].std(ddof=1):.2f}".replace("0.", ".")
+                txt = f"{means[tau]:.3f} $\\pm$ {p[tau].std(ddof=1):.3f}".replace("0.", ".")
                 same = tau == best or stats.ttest_rel(p[best], p[tau]).pvalue >= 0.05
                 cells.append(f"\\textbf{{{txt}}}" if same else txt)
             lead = f"\\multirow{{2}}{{*}}{{{horizon}}}" if metric == "ci" else ""

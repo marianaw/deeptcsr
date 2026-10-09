@@ -27,9 +27,11 @@ to the feature mean, i.e. 0 after standardisation.
 Labels use the project convention ``ts = n_steps - censored``. Vehicles whose
 sequence exceeds the horizon are administratively censored at the horizon.
 
+Subsample: 5,000 of the 23,550 vehicles, drawn uniformly without replacement
+with a fixed seed (``SUBSAMPLE_SEED``).
+
 Run:
-    uv run python scripts/prepare_scania.py            # 5,000-vehicle subsample
-    uv run python scripts/prepare_scania.py --all      # all 23,550 vehicles
+    uv run python scripts/prepare_scania.py --raw path/to/scania_component_x_v3
 """
 
 from __future__ import annotations
@@ -41,15 +43,14 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-RAW = Path("data/scania_component_x_v3")
 OUT = Path("data/scania")
-SUBSAMPLE = Path("results/scania_component_x/subsample_vehicle_ids.csv")
+SUBSAMPLE_SEED, SUBSAMPLE_SIZE = 20250913, 5000
 
 
-def load_readouts(keep_ids: set[int] | None, chunksize: int = 500_000):
+def load_readouts(raw: Path, keep_ids: set[int] | None, chunksize: int = 500_000):
     """Stream the 1.2 GB readout file, keeping only the requested vehicles."""
     parts = []
-    for chunk in pd.read_csv(RAW / "train_operational_readouts.csv",
+    for chunk in pd.read_csv(raw / "train_operational_readouts.csv",
                              chunksize=chunksize):
         if keep_ids is not None:
             chunk = chunk[chunk.vehicle_id.isin(keep_ids)]
@@ -60,6 +61,8 @@ def load_readouts(keep_ids: set[int] | None, chunksize: int = 500_000):
 
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--raw", type=Path, default=Path("data/scania_component_x_v3"),
+                    help="dir with train_operational_readouts.csv and train_tte.csv")
     ap.add_argument("--horizon", type=int, default=100,
                     help="max steps kept; p95 sequence length is 97")
     ap.add_argument("--all", action="store_true",
@@ -67,13 +70,15 @@ def main():
     ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args()
 
-    tte = pd.read_csv(RAW / "train_tte.csv")
+    tte = pd.read_csv(args.raw / "train_tte.csv")
     keep = None
     if not args.all:
-        keep = set(pd.read_csv(SUBSAMPLE).vehicle_id.tolist())
+        ids = np.sort(tte.vehicle_id.unique())
+        keep = set(np.random.default_rng(SUBSAMPLE_SEED).choice(
+            ids, size=SUBSAMPLE_SIZE, replace=False).tolist())
         tte = tte[tte.vehicle_id.isin(keep)]
 
-    logs = load_readouts(keep).sort_values(["vehicle_id", "time_step"],
+    logs = load_readouts(args.raw, keep).sort_values(["vehicle_id", "time_step"],
                                            kind="stable")
     cols = [c for c in logs.columns if c not in ("vehicle_id", "time_step")]
 

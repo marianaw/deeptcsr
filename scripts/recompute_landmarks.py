@@ -16,8 +16,8 @@ from survan.data import load_dataset, train_val_test_split
 from survan.backbones import build_backbone
 from survan.metrics import td_concordance_index, td_brier_score
 
-ROOT = Path(os.environ.get("OUTPUT_DIR", "outputs_final"))  # one path component
-DATA_ROOT = os.environ.get("DATA_ROOT", "../SurvanData")
+ROOT = Path(os.environ.get("OUTPUT_DIR", "outputs"))
+DATA_ROOT = os.environ.get("DATA_ROOT", "data")
 ARCH = {"transformer": dict(hidden_size=64, num_layers=2),
         "gru_attn": dict(hidden_size=128, attention_hidden=16)}
 
@@ -45,19 +45,21 @@ def fixed_grid(ts):
 
 def main():
     cache = {}
+    # <algorithm>/<dataset>/<backbone>/lambda_*/target_lr_*/landmark_*/seed_*
+    rel = lambda m: m.relative_to(ROOT).parts
     runs = sorted(ROOT.rglob("model.pkl"),
-                  key=lambda m: (m.parts[2], int(m.parts[7].split("_")[1])))
+                  key=lambda m: (rel(m)[1], int(rel(m)[6].split("_")[1])))
     # skip finished work so an interrupted pass resumes instead of restarting
     runs = [m for m in runs
             if not (m.parent / "landmarks_fixed_val.json").exists()]
     # ONLY=<dataset> lets one process per dataset run in parallel
-    runs = [m for m in runs if os.environ.get("ONLY", m.parts[2]) == m.parts[2]]
+    runs = [m for m in runs if os.environ.get("ONLY", rel(m)[1]) == rel(m)[1]]
     print(f"{len(runs)} runs to do")
     cur_split = (None, None, None)
     for i, mp in enumerate(runs, 1):
-        p = mp.parts
-        algo, ds, bb = p[1], p[2], p[3]
-        seed = int(p[7].split("_")[1])
+        p = rel(mp)
+        algo, ds, bb = p[0], p[1], p[2]
+        seed = int(p[6].split("_")[1])
         if ds not in cache:
             cache.clear()  # one dataset resident at a time
             c, path = dataset_cfg(ds)

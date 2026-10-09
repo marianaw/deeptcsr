@@ -8,9 +8,7 @@
 # One winner per family is then applied to EVERY dataset and EVERY arm, so the
 # method comparison stays controlled by construction.
 #
-# Grid (hidden_size=16 / num_layers=1 dropped: the existing 924-run sweep
-# already evidences it, and NASA sat at chance there). The h16/l1 reference
-# under this same 1000-epoch protocol comes from the timing benchmark.
+# Grid:
 #   transformer (Cox family): (64,2), (128,2), (128,4)
 #   gru_attn    (DDH family): 64, 128
 # 2 datasets x 5 configs x 2 seeds = 20 runs.
@@ -19,19 +17,18 @@
 # without that split the configs would overwrite each other's results.
 set -e
 cd "$(dirname "$0")/.."
-export PATH=$HOME/.local/bin:$PATH
 export PYTHONUNBUFFERED=1
 if [[ "${SINGLE_THREAD:-1}" == "1" ]]; then
   export XLA_FLAGS="--xla_cpu_multi_thread_eigen=false ${XLA_FLAGS:-}"
   export OMP_NUM_THREADS=1
 fi
 
-DATA_ROOT=${DATA_ROOT:-/workspace/SurvanData}
+DATA_ROOT=${DATA_ROOT:-data}
 OUTPUT_DIR=${OUTPUT_DIR:-outputs_arch}
 NWORKERS=${NWORKERS:-16}
 EPOCHS=${EPOCHS:-1000}
 SEEDS=${SEEDS:-"0 1"}
-LAM=0.1; TAU=0.05          # same corner as the timing benchmark
+LAM=0.1; TAU=0.05
 
 cmds=$(python3 - "$SEEDS" <<'EOF'
 import sys

@@ -1,6 +1,6 @@
 """Final large-benchmark tables: baseline vs Inc-TCSR vs D-TCSR.
 
-Reads outputs_final/ (every arm recomputed with current code under one
+Reads outputs/ (every arm recomputed with current code under one
 protocol) and reports BOTH evaluation protocols:
 
   * TCSR protocol  -- read-out at state 0, global C-index / IBS. Faithful to
@@ -28,7 +28,7 @@ NAME = {"cox": "baseline", "inc_tc_cox": "Inc-TCSR", "tc_cox": "D-TCSR",
         "ddh": "baseline", "inc_tc_ddh": "Inc-TCSR", "tc_ddh": "D-TCSR"}
 
 
-def load(root=Path(os.environ.get("OUTPUT_DIR", "outputs_final"))):
+def load(root=Path(os.environ.get("OUTPUT_DIR", "outputs"))):
     flat, land = [], []
     for f in root.rglob("results_test.json"):
         p = f.parts

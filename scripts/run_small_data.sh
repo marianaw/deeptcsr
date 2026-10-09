@@ -1,15 +1,12 @@
 #!/bin/bash
-# Small-data learning-curve benchmark: metrics vs number of training
-# sequences n in {10,20,30,50,75,100}, fixed test set (test_seed=1234),
-# 10 seeds resampling train/val. lambda_=0 throughout.
-# Algorithms: baseline (landmark MLE), fitted TCSR, Inc-TCSR (tau=1),
-# D-TCSR (tau < 1, selected on validation C-index per seed/size).
+# Small-data learning-curve benchmark (PBC2, AIDS, SmallRW): metrics vs number
+# of training sequences n in {10,20,30,50,75,100}, fixed test set
+# (test_seed=1234), seeds 0..9 resampling train/val, lambda = 0 throughout.
+# Arms: baseline (landmark MLE), fitted TCSR (needs tdsurv, see README),
+# Inc-TCSR (tau = 1), D-TCSR (tau grid below). Selection: small_data_table.py.
+# Env: DATA_ROOT, OUTPUT_DIR, DATASETS, SEQUENTIAL=1 (one size at a time).
 set -e
 cd "$(dirname "$0")/.."
-# XLA sizes its thread pools by the CPUs it can see; on a big shared host
-# (256 cores) that is ~900 threads per run and exhausts the pod's pids limit.
-# Children inherit this shell's affinity; the pod's CPU quota is time-based.
-taskset -cp 0-$(( ${PIN_CPUS:-32} - 1 )) $$ >/dev/null 2>&1 || true
 
 SEEDS="range(0,10)"
 DATASETS=${DATASETS:-aids,pbc2,rw}
@@ -27,7 +24,6 @@ run_size() {
       algorithm.name=inc_tcsr algorithm.target_lr=1.0 "${common[@]}"
   uv run python scripts/run.py -m dataset=$DATASETS algorithm=d_tcsr \
       algorithm.target_lr=$TAUS "${common[@]}"
-  [[ -n $SKIP_FITTED ]] && return  # fitted TCSR (tdsurv) is unaffected by the censoring fix
   for ds in aids pbc2 rw; do
     for seed in $(seq 0 9); do
       uv run python scripts/run_fitted_tcsr.py --dataset $ds --seed $seed \
@@ -37,12 +33,11 @@ run_size() {
 }
 
 for n in 10 20 30 50 75 100; do
-  # SEQUENTIAL=1: one size at a time. Each hydra multirun process grows to
-  # ~4 GB, so six in parallel can exhaust a 32 GB laptop.
+  # each size is one hydra multirun process (~4 GB); SEQUENTIAL=1 runs one at a time
   if [[ -n ${SEQUENTIAL:-} ]]; then
-    run_size $n > /tmp/small_data_n$n.log 2>&1
+    run_size $n > ${OUTPUT_DIR:-outputs_small}_n$n.log 2>&1
   else
-    run_size $n > /tmp/small_data_n$n.log 2>&1 &
+    run_size $n > ${OUTPUT_DIR:-outputs_small}_n$n.log 2>&1 &
   fi
 done
 wait

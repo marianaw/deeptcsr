@@ -6,15 +6,24 @@ network" subsection (originally notebooks/ablation_tau.ipynb, removed in
 
   * 20-dim Gauss-Markov random walks (tdsurv generator), horizons
     H in {30, 50, 100}; the churn bias is calibrated per H for ~20% censoring.
-  * For each (H, tau): 30 independent training sets of 50 sequences, one
+  * For each (H, tau): 30 independent training (and validation) sets, one
     shared test set of 1000 sequences.
   * LH model with the LargeRW setup of the main experiments (transformer
-    64x2, AdamW lr 1e-2, wd 1e-4), temporal consistency with lambda = 0,
-    target network updated after every step with rate tau; up to 1000 epochs
-    with early stopping (patience 50 epochs = 50 steps) on the loss of an independent validation
-    set of 50 sequences, as in the main experiments; the model initialization
-    is fixed (seed 42) so the spread
-    across runs comes from the training data, as in the original.
+    64x2, AdamW lr 1e-2, wd 1e-4, batch 128), temporal consistency with a
+    fixed lambda, target network updated after every step with rate tau; the
+    model initialization is fixed (seed 42) so the spread across runs comes
+    from the training data, as in the original.
+
+  Protocol (environment variables; defaults = main-experiment regime):
+    ABL_OUT       output dir                  results/tau_ablation_main
+    ABL_LAMBDA    TC lambda                   0.1  (LargeRW D-TCSR selection)
+    ABL_NTRAIN    training sequences          1000 (~8 steps per epoch)
+    ABL_NVAL      validation sequences        500  (0 = no early stopping)
+    ABL_PATIENCE  early-stopping patience     5 epochs
+    ABL_EPOCHS    max epochs                  1000
+  Earlier runs: results/tau_ablation (lambda 0, 50 train, no ES, 100 epochs),
+  results/tau_ablation_es (lambda 0, 50 train, 50 val, patience 50),
+  results/tau_ablation_fixed (lambda 0, 50 train, no ES, 1000 epochs).
   * Metrics on the test set (state-0 protocol): C-index and IBS.
   * Variability of the estimates: for every valid test entry (subject i,
     state l, horizon k), mean and std of h_theta(k | x_l) across the 30 runs;
@@ -27,17 +36,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 from scipy.special import expit as sigmoid
 
-OUT = Path("results/tau_ablation_es")
+env = os.environ.get
+OUT = Path(env("ABL_OUT", "results/tau_ablation_main"))
+LAMBDA = float(env("ABL_LAMBDA", "0.1"))
+N_TRAIN, N_VAL = int(env("ABL_NTRAIN", "1000")), int(env("ABL_NVAL", "500"))
+PATIENCE, EPOCHS = int(env("ABL_PATIENCE", "5")), int(env("ABL_EPOCHS", "1000"))
 HORIZONS = (30, 50, 100)
 BIAS = {30: -2.5, 50: -3.5, 100: -5.0}   # ~20% censoring (calibrated)
 TAUS = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0)
-N_RUNS, N_TRAIN, N_VAL, N_TEST, D = 30, 50, 50, 1000, 20
-EPOCHS, PATIENCE, MODEL_SEED = 1000, 50, 42  # 1 step per epoch here (50 seqs < batch 128)
+N_RUNS, N_TEST, D, MODEL_SEED = 30, 1000, 20, 42
 
 
 def generate(n, horizon, rng):
@@ -84,18 +97,20 @@ def run_one(horizon, tau, run):
     np.random.seed(run)  # BatchIterator shuffles with the global RNG
     gen = BatchIterator({"X": x, "ts": ts, "cs": cs, "target": y.astype(np.float32),
                          "h_ws": h_ws, "mask": mask}, batch_size=128, shuffle=True)
-    xv, tv, cv = generate(N_VAL, horizon, np.random.default_rng([horizon, run, 1]))
-    yv, wv, mv = get_targets_and_masks(xv, tv, cv, landmark=True)
-    val = BatchIterator({"X": xv, "ts": tv, "cs": cv, "target": yv.astype(np.float32),
-                         "h_ws": wv, "mask": mv}, batch_size=128, shuffle=False)
+    val = None
+    if N_VAL > 0:
+        xv, tv, cv = generate(N_VAL, horizon, np.random.default_rng([horizon, run, 1]))
+        yv, wv, mv = get_targets_and_masks(xv, tv, cv, landmark=True)
+        val = BatchIterator({"X": xv, "ts": tv, "cs": cv, "target": yv.astype(np.float32),
+                             "h_ws": wv, "mask": mv}, batch_size=128, shuffle=False)
     cfg = DeepTCSRConfig(
         horizon=H, feature_dim=D + 1, backbone="transformer",
         backbone_kwargs=dict(hidden_size=64, num_layers=2, seq_len=H, dropout=0.2),
-        learning_rate=1e-2, weight_decay=1e-4, lambda_=0.0, target_lr=tau, tc=True,
+        learning_rate=1e-2, weight_decay=1e-4, lambda_=LAMBDA, target_lr=tau, tc=True,
         loss_norm="weighted", num_epochs=EPOCHS, early_stopping_patience=PATIENCE,
         batch_size=128, seed=MODEL_SEED)
     model = DeepTCSR(cfg, sample_x=x)
-    epochs = len(model.train(gen, val_gen=val))
+    epochs = len(model.train(gen, val_gen=val))  # val None: no early stopping
 
     xt, tt, ct = test_set(horizon)
     ci, ci_ipcw, ibs, ibs_ipcw = model.evaluate(xt, tt, ct, ts, cs)

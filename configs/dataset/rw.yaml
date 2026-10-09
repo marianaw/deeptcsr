@@ -1,6 +1,6 @@
-name: pbc2
-data_path: ${data_root}/small_datasets/pbc-seqs.pkl
-horizon: 16
+name: rw
+data_path: ${data_root}/small_datasets/rw-seqs.pkl
+horizon: 11
 landmark: true
 stratify: false
 batch_size: 128

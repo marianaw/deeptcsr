@@ -33,15 +33,38 @@ def main(cfg: DictConfig) -> None:
         compute_targets=True,
         kwargs={"data_path": ds.data_path, "horizon": ds.horizon},
     )
+    # target stays float32; h_ws/mask stay bool (4x smaller) — the model
+    # casts per-batch, so training numerics are unchanged.
     arrays = {"X": seqs.astype(np.float32),
               "target": target.astype(np.float32),
-              "h_ws": h_ws.astype(np.float32),
-              "mask": mask.astype(np.float32)}
-    splits = train_val_test_split(
-        arrays, ts, cs,
-        seed=cfg.seed, test_size=cfg.test_size, val_size=cfg.val_size,
-        stratify=ds.stratify,
-    )
+              "h_ws": h_ws,
+              "mask": mask}
+    if cfg.get("test_seed") is not None:
+        # Learning-curve protocol: test set fixed by test_seed across all
+        # seeds/sizes; the run seed reshuffles the remainder into train/val;
+        # n_train truncates the (shuffled) train pool.
+        s1 = train_val_test_split(
+            arrays, ts, cs, seed=cfg.test_seed, test_size=cfg.test_size,
+            val_size=None, stratify=ds.stratify)
+        rest = s1["train"]
+        arrays2 = {k: rest[k] for k in arrays}
+        val_frac = cfg.val_size / (1.0 - cfg.test_size)
+        s2 = train_val_test_split(
+            arrays2, rest["ts"], rest["cs"], seed=cfg.seed,
+            test_size=val_frac, val_size=None, stratify=ds.stratify)
+        splits = {"train": s2["train"], "val": s2["test"], "test": s1["test"]}
+        if cfg.get("n_train") is not None:
+            n = int(cfg.n_train)
+            avail = len(splits["train"]["ts"])
+            if n > avail:
+                raise ValueError(f"n_train={n} > available train pool {avail}")
+            splits["train"] = {k: v[:n] for k, v in splits["train"].items()}
+    else:
+        splits = train_val_test_split(
+            arrays, ts, cs,
+            seed=cfg.seed, test_size=cfg.test_size, val_size=cfg.val_size,
+            stratify=ds.stratify,
+        )
 
     train_gen = _make_split_gen(splits["train"], ds.batch_size, shuffle=True)
     val_gen = _make_split_gen(splits["val"], ds.batch_size, shuffle=False)
@@ -50,7 +73,10 @@ def main(cfg: DictConfig) -> None:
     model_cfg = DeepTCSRConfig(
         horizon=ds.horizon,
         feature_dim=seqs.shape[-1],
-        backbone=cfg.backbone.name,
+        # `name` labels the run directory; `arch` (when given) selects the
+        # factory. Splitting them lets a sweep vary capacity without runs
+        # overwriting each other's results under one shared path.
+        backbone=cfg.backbone.get("arch", cfg.backbone.name),
         backbone_kwargs=OmegaConf.to_container(cfg.backbone.kwargs, resolve=True),
         learning_rate=ds.learning_rate,
         weight_decay=ds.weight_decay,
@@ -58,11 +84,13 @@ def main(cfg: DictConfig) -> None:
         batch_size=ds.batch_size,
         lambda_=cfg.algorithm.lambda_,
         target_lr=cfg.algorithm.target_lr,
+        tc=cfg.algorithm.get("tc", None),
         ranking_weight=cfg.algorithm.ranking_weight,
         ranking_sigma=cfg.algorithm.get("ranking_sigma", 1.0),
         cov_pred_weight=cfg.algorithm.cov_pred_weight,
         loss_norm=cfg.algorithm.loss_norm,
         weight_by_h_ws=cfg.algorithm.get("weight_by_h_ws", True),
+        early_stopping_patience=ds.get('patience', 5),
         seed=cfg.seed,
         verbose=True,
     )
@@ -87,6 +115,24 @@ def main(cfg: DictConfig) -> None:
                              "ci_ipcw": val_ci_ipcw, "bs_ipcw": val_ibs_ipcw})
     os.rename(os.path.join(out, "results.json"),
               os.path.join(out, "results_val.json"))
+
+    # Dynamic-DeepHit style landmark x horizon evaluation, alongside the
+    # TCSR-protocol numbers above. Landmarks are quartiles of the TRAINING
+    # time-to-event distribution (test data never informs the grid).
+    # Landmark 0 is the TCSR read-out point (what the Cox family reports as
+    # its headline), so including it gives that protocol a horizon-resolved
+    # C(t)-index too; the quartiles are the DDH-style dynamic landmarks.
+    lm = [0] + np.percentile(tr_ts, [25, 50, 75]).astype(int).tolist()
+    import json as _json
+    for split, sp in (("test", test_split), ("val", splits["val"])):
+        grid = model.evaluate_landmarks(sp["X"], sp["ts"], sp["cs"],
+                                        landmarks=lm, train_ts=tr_ts,
+                                        train_cs=tr_cs)
+        with open(os.path.join(out, f"landmarks_{split}.json"), "w") as f:
+            _json.dump([{"landmark": int(k[0]), "horizon": int(k[1]),
+                         **{kk: (float(vv) if isinstance(vv, float) else int(vv))
+                            for kk, vv in v.items()}}
+                        for k, v in grid.items()], f)
     model.save(out)
     print(f"test ci={test_ci:.4f} ({test_ci_ipcw:.4f} ipcw)  "
           f"bs={test_ibs:.4f} ({test_ibs_ipcw:.4f} ipcw)  → {out}")

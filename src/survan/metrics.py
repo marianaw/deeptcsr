@@ -38,19 +38,28 @@ def _prep(ts, cs, train_ts, train_cs, surv=None):
 def concordance_index_ipcw(scores, ts, cs, train_ts=None, train_cs=None):
     """Uno's IPCW C-index (sksurv). `scores` follow `concordance_index`
     convention (higher = longer survival); we negate for risk."""
-    train, test, keep, tau, _ = _prep(ts, cs, train_ts, train_cs)
-    est = -np.asarray(scores)[keep]
-    return float(_ci_ipcw(train, test, est, tau=tau)[0])
+    try:
+        train, test, keep, tau, _ = _prep(ts, cs, train_ts, train_cs)
+        est = -np.asarray(scores)[keep]
+        return float(_ci_ipcw(train, test, est, tau=tau)[0])
+    except ValueError:
+        # Degenerate follow-up range (e.g. tiny training subsets in the
+        # learning-curve protocol) — IPCW estimate undefined.
+        return float("nan")
 
 
 def integrated_brier_score_ipcw(surv, ts, cs, train_ts=None, train_cs=None):
     """IPCW IBS (sksurv). `surv` shape (N, T) with column h = P(T > h)."""
-    train, test, _, tau, surv = _prep(ts, cs, train_ts, train_cs, surv)
-    times = np.arange(1, surv.shape[1] + 1, dtype=float)
-    lo = float(test["time"].min())
-    hi = min(float(test["time"].max()), tau)
-    keep_t = (times > lo) & (times < hi)
-    return float(_ibs_ipcw(train, test, surv[:, keep_t], times[keep_t]))
+    try:
+        train, test, _, tau, surv = _prep(ts, cs, train_ts, train_cs, surv)
+        times = np.arange(1, surv.shape[1] + 1, dtype=float)
+        lo = float(test["time"].min())
+        hi = min(float(test["time"].max()), tau)
+        keep_t = (times > lo) & (times < hi)
+        return float(_ibs_ipcw(train, test, surv[:, keep_t], times[keep_t]))
+    except ValueError:
+        # Degenerate follow-up range (see concordance_index_ipcw).
+        return float("nan")
 
 
 def kaplan_meier(ts, cs):
@@ -116,3 +125,77 @@ def integrated_brier_score_np(surv, ts, cs):
         b = np.where(np.isfinite(b), b, 0)
         total += np.sum(a) + np.sum(b)
     return float(total / (t_max * len(ts)))
+
+
+# ---------- Dynamic-DeepHit style landmark evaluation ----------
+#
+# Ports the reference implementation's metrics (chl8856/Dynamic-DeepHit,
+# utils_eval.py): a cause-specific time-dependent C(t)-index and Brier score
+# evaluated at a horizon, scored against a CONDITIONAL risk
+# F(t_M + delta | T > t_M) rather than a median survival time. The weighted
+# variants use an IPCW censoring KM fitted on the TRAINING split, as there.
+
+
+def _censoring_km(train_ts, train_cs):
+    """G(t): KM of the censoring distribution, fitted on training data."""
+    from lifelines import KaplanMeierFitter
+    t = np.asarray(train_ts).reshape(-1).astype(float)
+    censored = np.asarray(train_cs).reshape(-1).astype(bool)
+    kmf = KaplanMeierFitter()
+    kmf.fit(t, event_observed=censored.astype(int))  # "event" = being censored
+    g = np.asarray(kmf.survival_function_.reset_index()).T
+    nz = g[1, g[1, :] != 0]
+    if len(nz):  # zero-order hold, as in the reference, to avoid 1/0
+        g[1, g[1, :] == 0] = nz[-1]
+    return g
+
+
+def _g_at(g, t):
+    idx = np.where(g[0, :] >= t)[0]
+    return g[1, -1] if len(idx) == 0 else g[1, idx[0]]
+
+
+def td_concordance_index(risk, ts, cs, horizon, train_ts=None, train_cs=None):
+    """Cause-specific C(t)-index at `horizon`; higher risk = earlier event.
+
+    Pairs are comparable when the earlier subject had an observed event at or
+    before `horizon`. Returns NaN when no comparable pair exists (the
+    reference returns -1). IPCW-weighted when train_ts/train_cs are given.
+    """
+    risk = np.asarray(risk, dtype=float)
+    t = np.asarray(ts, dtype=float)
+    ev = (~np.asarray(cs).astype(bool)).astype(float)
+    n = len(risk)
+    if n == 0:
+        return float("nan")
+    g = _censoring_km(train_ts, train_cs) if train_ts is not None else None
+    w = np.ones(n)
+    if g is not None:
+        w = np.array([(1.0 / _g_at(g, t[i])) ** 2 for i in range(n)])
+    a = (t[:, None] < t[None, :]) * w[:, None]
+    # ties count 1/2 (Harrell); the reference counts them 0, which drives
+    # near-constant predictions far below 0.5
+    q = (risk[:, None] > risk[None, :]) + 0.5 * (risk[:, None] == risk[None, :])
+    n_t = ((t <= horizon) & (ev == 1))[:, None].astype(float)
+    num = float(np.sum(a * n_t * q))
+    den = float(np.sum(a * n_t))
+    if den == 0:
+        return float("nan")
+    return num / den
+
+
+def td_brier_score(risk, ts, cs, horizon, train_ts, train_cs):
+    """IPCW time-dependent Brier score at `horizon` against the conditional
+    risk (reference `weighted_brier_score`). Subjects censored before
+    `horizon` get weight 0; there is deliberately no unweighted variant."""
+    risk = np.asarray(risk, dtype=float)
+    t = np.asarray(ts, dtype=float)
+    ev = (~np.asarray(cs).astype(bool)).astype(float)
+    if len(risk) == 0 or train_ts is None:
+        return float("nan")
+    surv_true = (t > horizon).astype(float)
+    g = _censoring_km(train_ts, train_cs)
+    g2 = _g_at(g, horizon)
+    w = np.array([(1.0 - surv_true[i]) * ev[i] / _g_at(g, t[i])
+                  + surv_true[i] / g2 for i in range(len(risk))])
+    return float(np.mean(w * (surv_true - (1.0 - risk)) ** 2))

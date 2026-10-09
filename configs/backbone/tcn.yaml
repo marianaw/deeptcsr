@@ -1,6 +1,0 @@
-name: tcn
-kwargs:
-  num_channels: [64, 32, 16]
-  kernel_size: 3
-  dilation_factor: 2
-  dropout: 0.2

@@ -1,3 +1,9 @@
 name: gru_attn
 kwargs:
   hidden_size: 32
+  # DDH's attention MLP width (h_dim2 in the reference implementation). Kept
+  # small deliberately: the causal per-landmark attention materialises a
+  # (B, T, T, attention_hidden) tensor, which is 2.2 GB at width 64 with
+  # T=363 (NASA) and batch 64 -- enough to OOM the pod at 20 workers. At 16
+  # the same step peaks at 1.2 GB.
+  attention_hidden: 16

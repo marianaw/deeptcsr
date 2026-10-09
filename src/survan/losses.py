@@ -10,7 +10,7 @@ import optax
 # ---------- TC soft targets & weights (lifted from deep_lambda_cox) ----------
 
 
-def tc_targets(b_tgt, h_tgt, lambda_, T):
+def tc_targets(b_tgt, h_tgt, lambda_, T, c, ts):
     """Soft hazard targets blended with the target-network forecast.
 
     Args:
@@ -18,6 +18,11 @@ def tc_targets(b_tgt, h_tgt, lambda_, T):
         h_tgt: hard one-hot targets, shape (B, T, T).
         lambda_: blending coefficient.
         T: horizon.
+        c, ts: censoring indicator and time, shape (B,). For censored
+            subjects rows >= ts carry nothing: the lambda-return keeps only the
+            bootstrap from the last observed state x_ts and drops the mass past
+            censoring, exactly as tdsurv `_targets` (lambda=1 is then the MLE).
+            Nothing is bootstrapped from padded states.
     """
     B = b_tgt.shape[0]
     stgt_init = jnp.roll(b_tgt[:, T - 1], -1).at[:, T - 1].set(0.0)
@@ -25,43 +30,49 @@ def tc_targets(b_tgt, h_tgt, lambda_, T):
 
     def step(carry, h):
         next_b, next_h = carry
-        ht, bt = h
+        ht, bt, i = h
         out = lambda_ * next_h + (1 - lambda_) * next_b
         out = jnp.roll(out, 1).at[:, 0].set(ht[:, 0])
         cond = ht[:, 0] == 1
         out = jnp.where(cond[:, None], jnp.zeros((B, T)).at[:, 0].set(1), out)
+        out = jnp.where((c & (i >= ts))[:, None], 0.0, out)
         return (bt, out), out
 
     _, out = jax.lax.scan(
         step, (stgt_init, htgt_init),
-        (jnp.transpose(h_tgt, (1, 0, 2)), jnp.transpose(b_tgt, (1, 0, 2))),
+        (jnp.transpose(h_tgt, (1, 0, 2)), jnp.transpose(b_tgt, (1, 0, 2)),
+         jnp.arange(b_tgt.shape[1])),
         reverse=True,
     )
     return jnp.transpose(out, (1, 0, 2))
 
 
-def tc_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T):
-    """Soft importance weights, blended with the target-network forecast."""
+def tc_weights(s_wgt, h_wgt, h_tgt, c, lambda_, T, ts):
+    """Soft importance weights, blended with the target-network forecast.
+    Truncated at the last observed state of censored subjects, as in
+    `tc_targets`."""
     B = s_wgt.shape[0]
     w_init = jnp.roll(s_wgt[:, T - 1], 1).at[:, 0].set(1.0)
     w_init = jnp.where(c[:, None], jnp.ones((B, T)), w_init)
 
     def step(carry, h):
         next_s, next_h = carry
-        ht, hw, sw = h
+        ht, hw, sw, i = h
         out = lambda_ * next_h + (1 - lambda_) * next_s
         val = jax.lax.select(c, jnp.ones_like(hw[:, 0], dtype=jnp.float32),
                              hw[:, 0].astype(jnp.float32))
         out = jnp.roll(out, 1).at[:, 0].set(val)
         cond = ht[:, 0] == 1
         out = jnp.where(cond[:, None], jnp.zeros((B, T)).at[:, 0].set(1), out)
+        out = jnp.where((c & (i >= ts))[:, None], 0.0, out)
         return (sw, out), out
 
     _, out = jax.lax.scan(
         step, (s_wgt[:, T - 1], w_init),
         (jnp.transpose(h_tgt, (1, 0, 2)),
          jnp.transpose(h_wgt, (1, 0, 2)),
-         jnp.transpose(s_wgt, (1, 0, 2))),
+         jnp.transpose(s_wgt, (1, 0, 2)),
+         jnp.arange(s_wgt.shape[1])),
         reverse=True,
     )
     return jnp.transpose(out, (1, 0, 2))

@@ -1,5 +1,5 @@
 name: aids
-data_path: ${data_root}/aids-seqs.pkl
+data_path: ${data_root}/small_datasets/aids-seqs.pkl
 horizon: 5
 landmark: true
 stratify: false

@@ -10,4 +10,4 @@ algorithm:
   ranking_sigma: 1.0
   cov_pred_weight: 0.1
   loss_norm: weighted
-  weight_by_h_ws: false
+  weight_by_h_ws: true  # censoring-aware weights, same as the TC arms

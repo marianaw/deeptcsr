@@ -21,6 +21,7 @@ from .losses import (covariate_prediction_loss, hazard_bce, median_survival_time
                      ranking_loss, survival_curve, target_survival_weights,
                      tc_targets, tc_weights)
 from .metrics import (concordance_index, concordance_index_ipcw,
+                      td_brier_score, td_concordance_index,
                       integrated_brier_score_ipcw, integrated_brier_score_np)
 
 
@@ -48,6 +49,11 @@ class DeepTCSRConfig:
     warmup_epochs: int = 0
     lambda_: float = 0.0
     target_lr: float = 1.0
+    tc: bool | None = None  # None: derive from lambda_ > 0 (legacy behavior).
+                            # Explicit True enables TC bootstrapping even at
+                            # lambda_=0 (pure one-step bootstrap targets, as in
+                            # the small-data TCSR protocol). target_lr=1.0 is
+                            # then Inc-TCSR; target_lr<1 is D-TCSR.
     ranking_weight: float = 0.0
     ranking_sigma: float = 1.0
     cov_pred_weight: float = 0.0
@@ -151,16 +157,18 @@ class DeepTCSR:
                       h_ws.astype(np.float32),
                       mask.astype(np.float32))
 
-    def _maybe_soft_targets(self, x, hard_y, h_ws, cs):
-        """Blend hard targets with the target network forecast when lambda_>0."""
-        if self.cfg.lambda_ <= 0.0:
+    def _maybe_soft_targets(self, x, hard_y, h_ws, cs, ts):
+        """Blend hard targets with the target network forecast when TC is on."""
+        use_tc = self.cfg.tc if self.cfg.tc is not None else self.cfg.lambda_ > 0.0
+        if not use_tc:
             return hard_y, (h_ws if self.cfg.weight_by_h_ws else None)
         tgt_logits, _ = self.backbone.apply(self.state.tgt_params, x)
         s_ws = target_survival_weights(tgt_logits)
+        cs = cs.astype(bool)
         soft_y = tc_targets(jax.nn.sigmoid(tgt_logits), hard_y,
-                            self.cfg.lambda_, self.cfg.horizon)
+                            self.cfg.lambda_, self.cfg.horizon, cs, ts)
         soft_w = tc_weights(s_ws, h_ws, hard_y, cs,
-                            self.cfg.lambda_, self.cfg.horizon)
+                            self.cfg.lambda_, self.cfg.horizon, ts)
         return soft_y, soft_w
 
     # ----- training -----
@@ -181,7 +189,7 @@ class DeepTCSR:
                                      jnp.asarray(batch["mask"]).astype(jnp.float32))
                 else:
                     y, h_ws, mask = self._hard_targets(x, ts, cs)
-                soft_y, soft_w = self._maybe_soft_targets(x, y, h_ws, cs)
+                soft_y, soft_w = self._maybe_soft_targets(x, y, h_ws, cs, ts)
                 self.state, loss = self._update(
                     self.state, x, soft_y, mask, soft_w, ts, cs)
                 losses.append(float(loss))
@@ -223,10 +231,10 @@ class DeepTCSR:
             else:
                 y, h_ws, mask = self._hard_targets(x, ts, cs)
             if self.cfg.loss_norm == "mean":
-                # Legacy Cox val: BCE * mask only (no h_ws on val).
+                # h_ws drops horizons past the event/censoring time.
                 logits, _ = self.backbone.apply(self.state.params, x)
                 bce = optax.sigmoid_binary_cross_entropy(logits, y)
-                total = jnp.mean(bce * mask)
+                total = jnp.mean(bce * mask * h_ws)
             else:
                 w_eval = h_ws if self.cfg.weight_by_h_ws else None
                 total = self._compute_loss(self.state.params, x, y, mask,
@@ -259,6 +267,74 @@ class DeepTCSR:
         ibs_ipcw = integrated_brier_score_ipcw(surv[:, 1:], ts_np, cs_np,
                                                train_ts, train_cs)
         return ci, ci_ipcw, ibs, ibs_ipcw
+
+    def evaluate_landmarks(self, x, ts, cs, landmarks, horizons=None,
+                           train_ts=None, train_cs=None):
+        """Dynamic-DeepHit style evaluation on a landmark x horizon grid.
+
+        At landmark ``t_M`` the model's hazard row ``logits[:, t_M, :]`` is
+        already the distribution conditional on surviving to ``t_M``, so the
+        risk within ``delta`` steps is ``1 - prod_{k<=delta}(1 - h_k)`` --
+        the same quantity the reference computes by renormalising its
+        cumulative incidence over ``[t_M, t_M + delta]``.
+
+        Only subjects still at risk at ``t_M`` are scored, with time measured
+        forward from the landmark. Horizons default to the 25/50/75th
+        percentiles of remaining time among at-risk TRAINING subjects, the
+        generic analogue of the reference's domain-chosen 1/3/5/10-year
+        windows. Returns ``{(t_M, delta): {...metrics...}}``.
+        """
+        logits, _ = self.backbone.apply(self.state.params, jnp.asarray(x))
+        haz = np.asarray(jax.nn.sigmoid(logits))
+        ts, cs = np.asarray(ts), np.asarray(cs).astype(bool)
+        tr_ts = np.asarray(train_ts) if train_ts is not None else None
+        tr_cs = np.asarray(train_cs).astype(bool) if train_cs is not None else None
+
+        out = {}
+        for t_m in landmarks:
+            t_m = int(t_m)
+            if t_m >= haz.shape[1]:
+                continue
+            at_risk = ts > t_m
+            if at_risk.sum() < 10:
+                continue
+            rem = (ts - t_m)[at_risk]
+            rem_cs = cs[at_risk]
+            # Survival from the landmark, accumulated in log space and in
+            # float64: a plain cumprod underflows to 0.0 at long horizons, so
+            # every subject's risk ties at exactly 1.0 and the C(t)-index
+            # collapses to 0 from ties rather than from bad ranking.
+            h_lm = np.clip(haz[at_risk, t_m, :].astype(np.float64), 0.0, 1 - 1e-12)
+            log_s = np.cumsum(np.log1p(-h_lm), axis=1)
+            surv = np.exp(log_s)
+
+            tr_rem = tr_cs_r = None
+            if tr_ts is not None:
+                tr_at_risk = tr_ts > t_m
+                if tr_at_risk.sum() >= 10:
+                    tr_rem = (tr_ts - t_m)[tr_at_risk]
+                    tr_cs_r = tr_cs[tr_at_risk]
+
+            if horizons is None:
+                base = tr_rem if tr_rem is not None else rem
+                hs = np.unique(np.percentile(base, [25, 50, 75]).astype(int))
+                hs = [h for h in hs if 1 <= h <= surv.shape[1]]
+            else:
+                hs = [int(h) for h in horizons if 1 <= h <= surv.shape[1]]
+
+            for d in hs:
+                risk = 1.0 - surv[:, d - 1]
+                rank = -log_s[:, d - 1]  # same order as risk, no underflow ties
+                out[(t_m, d)] = {
+                    "n_at_risk": int(at_risk.sum()),
+                    "n_events_by_h": int(((rem <= d) & ~rem_cs).sum()),
+                    "td_ci": td_concordance_index(rank, rem, rem_cs, d),
+                    "td_ci_ipcw": td_concordance_index(rank, rem, rem_cs, d,
+                                                       tr_rem, tr_cs_r),
+                    "td_bs_ipcw": td_brier_score(risk, rem, rem_cs, d,
+                                                 tr_rem, tr_cs_r),
+                }
+        return out
 
     # ----- I/O -----
 
